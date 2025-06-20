@@ -1,0 +1,27 @@
+server:
+  port: 8080
+  mode: debug  # debug or release
+
+redis:
+  addr: localhost:6379
+  password: ""
+  db: 0
+
+allocation:
+  webhook_url: http://localhost:8081/allocate
+
+log:
+  level: info  # debug, info, warn, error
+
+# Matchmaking settings
+matchmaking:
+  # How often to process matchmaking (in seconds)
+  process_interval: 5
+  
+  # Maximum time a player can wait in queue (in seconds)
+  max_wait_time: 300
+  
+  # Retry settings for allocation
+  allocation:
+    max_retries: 3
+    retry_delay: 1s 
