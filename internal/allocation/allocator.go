@@ -10,15 +10,24 @@ import (
 	"github.com/mm-rules/matchmaking/internal/models"
 )
 
+// Allocator interface for session allocation
+// Both Allocator and MockAllocator implement this
+//
+type Allocator interface {
+	AllocateSession(match *models.Match) (*models.GameSession, error)
+	AllocateSessionWithRetry(match *models.Match, maxRetries int, retryDelay time.Duration) (*models.GameSession, error)
+	ValidateAllocationRequest(req *models.AllocationRequest) error
+}
+
 // Allocator handles game session allocation
-type Allocator struct {
+type RealAllocator struct {
 	webhookURL string
 	client     *http.Client
 }
 
-// NewAllocator creates a new allocator instance
-func NewAllocator(webhookURL string) *Allocator {
-	return &Allocator{
+// NewAllocator creates a new real allocator instance
+func NewAllocator(webhookURL string) *RealAllocator {
+	return &RealAllocator{
 		webhookURL: webhookURL,
 		client: &http.Client{
 			Timeout: 30 * time.Second,
@@ -27,7 +36,7 @@ func NewAllocator(webhookURL string) *Allocator {
 }
 
 // AllocateSession allocates a game session for a match
-func (a *Allocator) AllocateSession(match *models.Match) (*models.GameSession, error) {
+func (a *RealAllocator) AllocateSession(match *models.Match) (*models.GameSession, error) {
 	// Create allocation request
 	req := models.AllocationRequest{
 		MatchID:  match.ID,
@@ -80,7 +89,7 @@ func (a *Allocator) AllocateSession(match *models.Match) (*models.GameSession, e
 }
 
 // AllocateSessionWithRetry allocates a session with retry logic
-func (a *Allocator) AllocateSessionWithRetry(match *models.Match, maxRetries int, retryDelay time.Duration) (*models.GameSession, error) {
+func (a *RealAllocator) AllocateSessionWithRetry(match *models.Match, maxRetries int, retryDelay time.Duration) (*models.GameSession, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -101,7 +110,7 @@ func (a *Allocator) AllocateSessionWithRetry(match *models.Match, maxRetries int
 }
 
 // ValidateAllocationRequest validates an allocation request
-func (a *Allocator) ValidateAllocationRequest(req *models.AllocationRequest) error {
+func (a *RealAllocator) ValidateAllocationRequest(req *models.AllocationRequest) error {
 	if req.MatchID == "" {
 		return fmt.Errorf("match_id is required")
 	}
@@ -155,6 +164,28 @@ func (ma *MockAllocator) AllocateSession(match *models.Match) (*models.GameSessi
 	}
 
 	return session, nil
+}
+
+// AllocateSessionWithRetry for mock just calls AllocateSession
+func (ma *MockAllocator) AllocateSessionWithRetry(match *models.Match, maxRetries int, retryDelay time.Duration) (*models.GameSession, error) {
+	return ma.AllocateSession(match)
+}
+
+// ValidateAllocationRequest for mock
+func (ma *MockAllocator) ValidateAllocationRequest(req *models.AllocationRequest) error {
+	if req.MatchID == "" {
+		return fmt.Errorf("match_id is required")
+	}
+	if req.GameID == "" {
+		return fmt.Errorf("game_id is required")
+	}
+	if len(req.Players) == 0 {
+		return fmt.Errorf("at least one player is required")
+	}
+	if req.TeamName == "" {
+		return fmt.Errorf("team_name is required")
+	}
+	return nil
 }
 
 // SetMockSession sets a mock session for a specific match

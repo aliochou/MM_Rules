@@ -47,7 +47,7 @@ func main() {
 
 	// Initialize allocator
 	webhookURL := viper.GetString("allocation.webhook_url")
-	allocator := allocation.NewAllocator(webhookURL)
+	var allocator allocation.Allocator = allocation.NewAllocator(webhookURL)
 
 	// Initialize API handler
 	handler := api.NewHandler(storage, allocator, logger)

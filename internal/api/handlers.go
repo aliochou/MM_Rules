@@ -1,15 +1,14 @@
 package api
 
 import (
-	"context"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mm-rules/matchmaking/internal/allocation"
 	"github.com/mm-rules/matchmaking/internal/engine"
 	"github.com/mm-rules/matchmaking/internal/matchmaker"
+	"github.com/mm-rules/matchmaking/internal/metrics"
 	"github.com/mm-rules/matchmaking/internal/models"
 	"github.com/mm-rules/matchmaking/internal/storage"
 	"github.com/sirupsen/logrus"
@@ -44,8 +43,11 @@ type MatchRequestRequest struct {
 
 // CreateMatchRequest handles POST /match-request
 func (h *Handler) CreateMatchRequest(c *gin.Context) {
+	start := time.Now()
+	
 	var req MatchRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		metrics.RecordHTTPRequest("POST", "/api/v1/match-request", "400", time.Since(start).Seconds())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -57,9 +59,14 @@ func (h *Handler) CreateMatchRequest(c *gin.Context) {
 	ctx := c.Request.Context()
 	if err := h.storage.StoreMatchRequest(ctx, matchRequest); err != nil {
 		h.logger.WithError(err).Error("Failed to store match request")
+		metrics.RecordHTTPRequest("POST", "/api/v1/match-request", "500", time.Since(start).Seconds())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create match request"})
 		return
 	}
+
+	// Record metrics
+	metrics.RecordMatchRequest(req.GameID, "created")
+	metrics.RecordHTTPRequest("POST", "/api/v1/match-request", "201", time.Since(start).Seconds())
 
 	h.logger.WithFields(logrus.Fields{
 		"request_id": matchRequest.ID,
@@ -75,14 +82,17 @@ func (h *Handler) CreateMatchRequest(c *gin.Context) {
 
 // CreateGameConfig handles POST /rules/:game_id
 func (h *Handler) CreateGameConfig(c *gin.Context) {
+	start := time.Now()
 	gameID := c.Param("game_id")
 	if gameID == "" {
+		metrics.RecordHTTPRequest("POST", "/api/v1/rules", "400", time.Since(start).Seconds())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "game_id is required"})
 		return
 	}
 
 	var config models.GameConfig
 	if err := c.ShouldBindJSON(&config); err != nil {
+		metrics.RecordHTTPRequest("POST", "/api/v1/rules", "400", time.Since(start).Seconds())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -92,6 +102,7 @@ func (h *Handler) CreateGameConfig(c *gin.Context) {
 
 	// Validate the configuration
 	if err := h.ruleEngine.ValidateGameConfig(&config); err != nil {
+		metrics.RecordHTTPRequest("POST", "/api/v1/rules", "400", time.Since(start).Seconds())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -100,6 +111,7 @@ func (h *Handler) CreateGameConfig(c *gin.Context) {
 	ctx := c.Request.Context()
 	if err := h.storage.StoreGameConfig(ctx, &config); err != nil {
 		h.logger.WithError(err).Error("Failed to store game config")
+		metrics.RecordHTTPRequest("POST", "/api/v1/rules", "500", time.Since(start).Seconds())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store game configuration"})
 		return
 	}
@@ -110,6 +122,7 @@ func (h *Handler) CreateGameConfig(c *gin.Context) {
 		"rules":   len(config.Rules),
 	}).Info("Created game configuration")
 
+	metrics.RecordHTTPRequest("POST", "/api/v1/rules", "201", time.Since(start).Seconds())
 	c.JSON(http.StatusCreated, gin.H{
 		"game_id": config.GameID,
 		"message": "Game configuration created successfully",
@@ -118,24 +131,26 @@ func (h *Handler) CreateGameConfig(c *gin.Context) {
 
 // GetMatchStatus handles GET /match-status/:request_id
 func (h *Handler) GetMatchStatus(c *gin.Context) {
+	start := time.Now()
 	requestID := c.Param("request_id")
 	if requestID == "" {
+		metrics.RecordHTTPRequest("GET", "/api/v1/match-status", "400", time.Since(start).Seconds())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "request_id is required"})
 		return
 	}
 
-	ctx := c.Request.Context()
-
 	// Try to get cached status first
-	status, err := h.storage.GetMatchStatus(ctx, requestID)
+	status, err := h.storage.GetMatchStatus(c.Request.Context(), requestID)
 	if err == nil {
+		metrics.RecordHTTPRequest("GET", "/api/v1/match-status", "200", time.Since(start).Seconds())
 		c.JSON(http.StatusOK, status)
 		return
 	}
 
 	// If no cached status, get the match request
-	request, err := h.storage.GetMatchRequest(ctx, requestID)
+	request, err := h.storage.GetMatchRequest(c.Request.Context(), requestID)
 	if err != nil {
+		metrics.RecordHTTPRequest("GET", "/api/v1/match-status", "404", time.Since(start).Seconds())
 		c.JSON(http.StatusNotFound, gin.H{"error": "Match request not found"})
 		return
 	}
@@ -152,35 +167,42 @@ func (h *Handler) GetMatchStatus(c *gin.Context) {
 		h.logger.WithField("request_id", requestID).Warn("Match found but session info not available")
 	}
 
+	metrics.RecordHTTPRequest("GET", "/api/v1/match-status", "200", time.Since(start).Seconds())
 	c.JSON(http.StatusOK, statusResponse)
 }
 
 // ProcessMatchmaking handles POST /process-matchmaking/:game_id
 func (h *Handler) ProcessMatchmaking(c *gin.Context) {
+	start := time.Now()
 	gameID := c.Param("game_id")
 	if gameID == "" {
+		metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "400", time.Since(start).Seconds())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "game_id is required"})
 		return
 	}
 
-	ctx := c.Request.Context()
-
 	// Get game configuration
-	config, err := h.storage.GetGameConfig(ctx, gameID)
+	config, err := h.storage.GetGameConfig(c.Request.Context(), gameID)
 	if err != nil {
+		metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "404", time.Since(start).Seconds())
 		c.JSON(http.StatusNotFound, gin.H{"error": "Game configuration not found"})
 		return
 	}
 
 	// Get pending match requests
-	requests, err := h.storage.GetGameQueue(ctx, gameID)
+	requests, err := h.storage.GetGameQueue(c.Request.Context(), gameID)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get game queue")
+		metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "500", time.Since(start).Seconds())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get match requests"})
 		return
 	}
 
+	// Update queue size metric
+	metrics.SetQueueSize(gameID, len(requests))
+
 	if len(requests) == 0 {
+		metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "200", time.Since(start).Seconds())
 		c.JSON(http.StatusOK, gin.H{
 			"message": "No pending match requests",
 			"matches": []interface{}{},
@@ -191,7 +213,11 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 	// Process matchmaking
 	matches := h.matchmaker.ProcessMatchPool(requests, config)
 
+	// Record matchmaking duration
+	metrics.RecordMatchmakingDuration(gameID, time.Since(start).Seconds())
+
 	if len(matches) == 0 {
+		metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "200", time.Since(start).Seconds())
 		c.JSON(http.StatusOK, gin.H{
 			"message": "No matches could be formed",
 			"matches": []interface{}{},
@@ -203,43 +229,25 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 	var matchResults []gin.H
 	for _, match := range matches {
 		// Store the match
-		if err := h.storage.StoreMatch(ctx, match); err != nil {
+		if err := h.storage.StoreMatch(c.Request.Context(), match); err != nil {
 			h.logger.WithError(err).Error("Failed to store match")
 			continue
 		}
 
+		// Record match creation metrics
+		metrics.RecordMatchCreated(gameID, len(match.Players))
+
 		// Update request statuses
 		for _, playerID := range match.Players {
-			// Find the request for this player
-			for _, request := range requests {
-				if request.PlayerID == playerID {
-					// Update status to matched
-					if err := h.storage.UpdateMatchRequestStatus(ctx, request.ID, models.StatusMatched); err != nil {
-						h.logger.WithError(err).Error("Failed to update request status")
-					}
-
-					// Store match status for this request
-					status := &models.MatchStatusResponse{
-						Status: models.StatusMatched,
-						Team:   &match.TeamName,
-					}
-					if err := h.storage.StoreMatchStatus(ctx, request.ID, status); err != nil {
-						h.logger.WithError(err).Error("Failed to store match status")
-					}
-
-					// Remove from queue
-					if err := h.storage.RemoveFromQueue(ctx, gameID, request.ID); err != nil {
-						h.logger.WithError(err).Error("Failed to remove from queue")
-					}
-					break
-				}
+			if err := h.storage.UpdateMatchRequestStatus(c.Request.Context(), playerID, models.StatusMatched); err != nil {
+				h.logger.WithError(err).WithField("player_id", playerID).Error("Failed to update request status")
 			}
 		}
 
 		matchResults = append(matchResults, gin.H{
-			"match_id":   match.ID,
-			"team_name":  match.TeamName,
-			"players":    match.Players,
+			"match_id":  match.ID,
+			"players":   match.Players,
+			"team_name": match.TeamName,
 			"created_at": match.CreatedAt,
 		})
 	}
@@ -249,6 +257,7 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 		"matches": len(matches),
 	}).Info("Processed matchmaking")
 
+	metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "200", time.Since(start).Seconds())
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Matchmaking processed successfully",
 		"matches": matchResults,
@@ -257,16 +266,22 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 
 // AllocateSessions handles POST /allocate-sessions/:game_id
 func (h *Handler) AllocateSessions(c *gin.Context) {
+	start := time.Now()
 	gameID := c.Param("game_id")
 	if gameID == "" {
+		metrics.RecordHTTPRequest("POST", "/api/v1/allocate-sessions", "400", time.Since(start).Seconds())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "game_id is required"})
 		return
 	}
 
-	ctx := c.Request.Context()
-
 	// Get all matches for this game (this is simplified - you'd need to track matches by game)
 	// For now, we'll just return a message indicating this endpoint needs implementation
+	
+	// Record allocation request
+	metrics.RecordAllocationRequest(gameID, "requested")
+	metrics.RecordAllocationDuration(gameID, time.Since(start).Seconds())
+	metrics.RecordHTTPRequest("POST", "/api/v1/allocate-sessions", "200", time.Since(start).Seconds())
+	
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Session allocation endpoint - implementation needed",
 		"game_id": gameID,
@@ -275,16 +290,20 @@ func (h *Handler) AllocateSessions(c *gin.Context) {
 
 // GetStats handles GET /stats
 func (h *Handler) GetStats(c *gin.Context) {
-	ctx := c.Request.Context()
+	start := time.Now()
+	
+	//ctx := c.Request.Context()
 
 	// Get storage stats
-	storageStats, err := h.storage.GetStats(ctx)
+	storageStats, err := h.storage.GetStats(c.Request.Context())
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get storage stats")
+		metrics.RecordHTTPRequest("GET", "/api/v1/stats", "500", time.Since(start).Seconds())
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get statistics"})
 		return
 	}
 
+	metrics.RecordHTTPRequest("GET", "/api/v1/stats", "200", time.Since(start).Seconds())
 	c.JSON(http.StatusOK, gin.H{
 		"storage": storageStats,
 		"timestamp": time.Now(),
@@ -293,10 +312,11 @@ func (h *Handler) GetStats(c *gin.Context) {
 
 // HealthCheck handles GET /health
 func (h *Handler) HealthCheck(c *gin.Context) {
-	ctx := c.Request.Context()
-
+	start := time.Now()
+	
 	// Check Redis connection
-	if err := h.storage.Ping(ctx); err != nil {
+	if err := h.storage.Ping(c.Request.Context()); err != nil {
+		metrics.RecordHTTPRequest("GET", "/health", "503", time.Since(start).Seconds())
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "unhealthy",
 			"error":  "Redis connection failed",
@@ -304,6 +324,7 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 		return
 	}
 
+	metrics.RecordHTTPRequest("GET", "/health", "200", time.Since(start).Seconds())
 	c.JSON(http.StatusOK, gin.H{
 		"status": "healthy",
 		"timestamp": time.Now(),

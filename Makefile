@@ -1,4 +1,4 @@
-.PHONY: build run test clean docker-build docker-run k8s-deploy k8s-clean demo
+.PHONY: build run test clean docker-build docker-run k8s-deploy k8s-clean demo import-dashboard
 
 # Build the application
 build:
@@ -69,6 +69,46 @@ redis-stop:
 	docker stop mm-rules-redis
 	docker rm mm-rules-redis
 
+# Start monitoring stack (Prometheus + Grafana)
+monitoring:
+	docker-compose up -d prometheus grafana
+
+# Stop monitoring stack
+monitoring-stop:
+	docker-compose down
+
+# Start full stack (Redis + Prometheus + Grafana)
+full-stack:
+	docker-compose up -d
+
+# Stop full stack
+full-stack-stop:
+	docker-compose down
+
+# View monitoring logs
+monitoring-logs:
+	docker-compose logs -f prometheus grafana
+
+# View all logs
+logs:
+	docker-compose logs -f
+
+# Check monitoring status
+monitoring-status:
+	docker-compose ps
+
+# Open Prometheus in browser (macOS)
+prometheus-open:
+	open http://localhost:9090
+
+# Open Grafana in browser (macOS)
+grafana-open:
+	open http://localhost:3000
+
+# Import Grafana dashboard
+import-dashboard:
+	./scripts/import-dashboard.sh
+
 # Show help
 help:
 	@echo "Available commands:"
@@ -88,4 +128,14 @@ help:
 	@echo "  tidy         - Generate go.sum"
 	@echo "  redis        - Start Redis for development"
 	@echo "  redis-stop   - Stop Redis"
+	@echo "  monitoring   - Start monitoring stack (Prometheus + Grafana)"
+	@echo "  monitoring-stop - Stop monitoring stack"
+	@echo "  full-stack   - Start full stack (Redis + Prometheus + Grafana)"
+	@echo "  full-stack-stop - Stop full stack"
+	@echo "  monitoring-logs - View monitoring logs"
+	@echo "  logs         - View all logs"
+	@echo "  monitoring-status - Check monitoring status"
+	@echo "  prometheus-open - Open Prometheus in browser"
+	@echo "  grafana-open - Open Grafana in browser"
+	@echo "  import-dashboard - Import Grafana dashboard"
 	@echo "  help         - Show this help" 
