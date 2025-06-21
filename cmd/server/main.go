@@ -35,12 +35,12 @@ func main() {
 	redisPassword := viper.GetString("redis.password")
 	redisDB := viper.GetInt("redis.db")
 
-	storage := storage.NewRedisStorage(redisAddr, redisPassword, redisDB)
-	defer storage.Close()
+	redisStorage := storage.NewRedisStorage(redisAddr, redisPassword, redisDB)
+	defer redisStorage.Close()
 
 	// Test Redis connection
 	ctx := context.Background()
-	if err := storage.Ping(ctx); err != nil {
+	if err := redisStorage.Ping(ctx); err != nil {
 		logger.Fatalf("Failed to connect to Redis: %v", err)
 	}
 	logger.Info("Connected to Redis")
@@ -50,7 +50,7 @@ func main() {
 	var allocator allocation.Allocator = allocation.NewAllocator(webhookURL)
 
 	// Initialize API handler
-	handler := api.NewHandler(storage, allocator, logger)
+	handler := api.NewHandler(redisStorage, allocator, logger)
 
 	// Setup router
 	router := setupRouter(handler)

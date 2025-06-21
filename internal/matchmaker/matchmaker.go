@@ -21,6 +21,13 @@ func NewMatchmaker() *Matchmaker {
 	}
 }
 
+// MatchWithRequests represents a match and the corresponding match requests
+// that were used to form it.
+type MatchWithRequests struct {
+	Match         *models.Match
+	RequestIDs    []string
+}
+
 // ProcessMatchPool processes a pool of players and attempts to form matches
 func (m *Matchmaker) ProcessMatchPool(players []*models.MatchRequest, config *models.GameConfig) []*models.Match {
 	var matches []*models.Match
@@ -38,6 +45,26 @@ func (m *Matchmaker) ProcessMatchPool(players []*models.MatchRequest, config *mo
 	}
 
 	return matches
+}
+
+// ProcessMatchPoolWithRequests processes a pool of players and attempts to form matches,
+// returning both the matches and the request IDs for each match.
+func (m *Matchmaker) ProcessMatchPoolWithRequests(players []*models.MatchRequest, config *models.GameConfig) []MatchWithRequests {
+	var results []MatchWithRequests
+	usedPlayers := make(map[string]bool)
+
+	// Sort teams by size (largest first) to prioritize larger matches
+	sortedTeams := make([]models.Team, len(config.Teams))
+	copy(sortedTeams, config.Teams)
+	sort.Slice(sortedTeams, func(i, j int) bool {
+		return sortedTeams[i].Size > sortedTeams[j].Size
+	})
+
+	for _, team := range sortedTeams {
+		results = append(results, m.formMatchesForTeamWithRequests(players, config, team, usedPlayers)...)
+	}
+
+	return results
 }
 
 // formMatchesForTeam attempts to form matches for a specific team configuration
@@ -80,6 +107,39 @@ func (m *Matchmaker) formMatchesForTeam(
 	}
 
 	return matches
+}
+
+// formMatchesForTeamWithRequests forms matches for a team and returns both the match and the request IDs.
+func (m *Matchmaker) formMatchesForTeamWithRequests(
+	players []*models.MatchRequest,
+	config *models.GameConfig,
+	team models.Team,
+	usedPlayers map[string]bool,
+) []MatchWithRequests {
+	var results []MatchWithRequests
+	availablePlayers := m.getAvailablePlayers(players, usedPlayers)
+
+	for len(availablePlayers) >= team.Size {
+		oldestPlayer := m.findOldestPlayer(availablePlayers)
+		elapsedTime := time.Since(oldestPlayer.CreatedAt)
+		compatiblePlayers := m.ruleEngine.FindCompatiblePlayers(availablePlayers, config.Rules, elapsedTime)
+		if len(compatiblePlayers) < team.Size {
+			break
+		}
+		selectedPlayers := m.selectBestPlayers(compatiblePlayers, team.Size, oldestPlayer.CreatedAt)
+		match := models.NewMatch(config.GameID, team.Name, m.getPlayerIDs(selectedPlayers))
+		requestIDs := make([]string, len(selectedPlayers))
+		for i, player := range selectedPlayers {
+			usedPlayers[player.ID] = true
+			requestIDs[i] = player.ID
+		}
+		results = append(results, MatchWithRequests{
+			Match:      match,
+			RequestIDs: requestIDs,
+		})
+		availablePlayers = m.getAvailablePlayers(players, usedPlayers)
+	}
+	return results
 }
 
 // getAvailablePlayers returns players that haven't been used in matches yet

@@ -117,6 +117,9 @@ curl -s "$BASE_URL/match-status/$REQUEST_ID2" | jq .
 echo -e "\n🔄 Step 4: Processing matchmaking..."
 curl -X POST "$BASE_URL/process-matchmaking/$GAME_ID" | jq .
 
+# Add a 1 second delay to allow status updates
+sleep 1
+
 echo -e "\n✅ Step 5: Checking final match status..."
 echo "Player 1 status:"
 curl -s "$BASE_URL/match-status/$REQUEST_ID1" | jq .

@@ -16,7 +16,7 @@ import (
 
 // Handler handles HTTP requests for the matchmaking API
 type Handler struct {
-	storage    *storage.RedisStorage
+	storage    storage.Storage
 	matchmaker *matchmaker.Matchmaker
 	ruleEngine *engine.RuleEngine
 	allocator  allocation.Allocator
@@ -24,7 +24,7 @@ type Handler struct {
 }
 
 // NewHandler creates a new API handler
-func NewHandler(storage *storage.RedisStorage, allocator allocation.Allocator, logger *logrus.Logger) *Handler {
+func NewHandler(storage storage.Storage, allocator allocation.Allocator, logger *logrus.Logger) *Handler {
 	return &Handler{
 		storage:    storage,
 		matchmaker: matchmaker.NewMatchmaker(),
@@ -211,12 +211,12 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 	}
 
 	// Process matchmaking
-	matches := h.matchmaker.ProcessMatchPool(requests, config)
+	matchResultsWithRequests := h.matchmaker.ProcessMatchPoolWithRequests(requests, config)
 
 	// Record matchmaking duration
 	metrics.RecordMatchmakingDuration(gameID, time.Since(start).Seconds())
 
-	if len(matches) == 0 {
+	if len(matchResultsWithRequests) == 0 {
 		metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "200", time.Since(start).Seconds())
 		c.JSON(http.StatusOK, gin.H{
 			"message": "No matches could be formed",
@@ -227,34 +227,34 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 
 	// Store matches and update request statuses
 	var matchResults []gin.H
-	for _, match := range matches {
+	for _, result := range matchResultsWithRequests {
 		// Store the match
-		if err := h.storage.StoreMatch(c.Request.Context(), match); err != nil {
+		if err := h.storage.StoreMatch(c.Request.Context(), result.Match); err != nil {
 			h.logger.WithError(err).Error("Failed to store match")
 			continue
 		}
 
 		// Record match creation metrics
-		metrics.RecordMatchCreated(gameID, len(match.Players))
+		metrics.RecordMatchCreated(gameID, len(result.Match.Players))
 
-		// Update request statuses
-		for _, playerID := range match.Players {
-			if err := h.storage.UpdateMatchRequestStatus(c.Request.Context(), playerID, models.StatusMatched); err != nil {
-				h.logger.WithError(err).WithField("player_id", playerID).Error("Failed to update request status")
+		// Update request statuses using request IDs
+		for _, requestID := range result.RequestIDs {
+			if err := h.storage.UpdateMatchRequestStatus(c.Request.Context(), requestID, models.StatusMatched); err != nil {
+				h.logger.WithError(err).WithField("request_id", requestID).Error("Failed to update request status")
 			}
 		}
 
 		matchResults = append(matchResults, gin.H{
-			"match_id":  match.ID,
-			"players":   match.Players,
-			"team_name": match.TeamName,
-			"created_at": match.CreatedAt,
+			"match_id":  result.Match.ID,
+			"players":   result.Match.Players,
+			"team_name": result.Match.TeamName,
+			"created_at": result.Match.CreatedAt,
 		})
 	}
 
 	h.logger.WithFields(logrus.Fields{
 		"game_id": gameID,
-		"matches": len(matches),
+		"matches": len(matchResults),
 	}).Info("Processed matchmaking")
 
 	metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "200", time.Since(start).Seconds())
@@ -274,17 +274,36 @@ func (h *Handler) AllocateSessions(c *gin.Context) {
 		return
 	}
 
-	// Get all matches for this game (this is simplified - you'd need to track matches by game)
-	// For now, we'll just return a message indicating this endpoint needs implementation
-	
-	// Record allocation request
+	var matches []*models.Match
+	if err := c.ShouldBindJSON(&matches); err != nil {
+		metrics.RecordHTTPRequest("POST", "/api/v1/allocate-sessions", "400", time.Since(start).Seconds())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	results := make([]gin.H, 0, len(matches))
+	for _, match := range matches {
+		session, err := h.allocator.AllocateSession(match)
+		if err != nil {
+			results = append(results, gin.H{
+				"match_id": match.ID,
+				"error":   err.Error(),
+			})
+			continue
+		}
+		results = append(results, gin.H{
+			"match_id": match.ID,
+			"session":  session,
+		})
+	}
+
 	metrics.RecordAllocationRequest(gameID, "requested")
 	metrics.RecordAllocationDuration(gameID, time.Since(start).Seconds())
 	metrics.RecordHTTPRequest("POST", "/api/v1/allocate-sessions", "200", time.Since(start).Seconds())
-	
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Session allocation endpoint - implementation needed",
-		"game_id": gameID,
+		"game_id":     gameID,
+		"allocations": results,
 	})
 }
 
