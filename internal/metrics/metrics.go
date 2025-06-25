@@ -98,6 +98,15 @@ var (
 		},
 		[]string{"method", "endpoint", "status"},
 	)
+
+	// AllocationErrorsCounter counts allocation errors
+	AllocationErrorsCounter = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "mm_rules_allocation_errors_total",
+			Help: "Total number of allocation errors",
+		},
+		[]string{"game_id"},
+	)
 )
 
 // RecordMatchRequest records a new match request
@@ -144,4 +153,9 @@ func SetActiveSessions(gameID string, count int) {
 func RecordHTTPRequest(method, endpoint, status string, duration float64) {
 	HTTPRequestCounter.WithLabelValues(method, endpoint, status).Inc()
 	HTTPRequestDurationHistogram.WithLabelValues(method, endpoint, status).Observe(duration)
-} 
+}
+
+// RecordAllocationError increments the allocation errors counter
+func RecordAllocationError(gameID string) {
+	AllocationErrorsCounter.WithLabelValues(gameID).Inc()
+}

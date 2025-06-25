@@ -8,8 +8,9 @@ set -e
 # Configuration
 GRAFANA_URL="http://localhost:3000"
 GRAFANA_USER="admin"
-GRAFANA_PASSWORD="nxz7pvq@gem2fvf6FQT"
-DASHBOARD_FILE="monitoring/grafana-dashboard.json"
+GRAFANA_PASS="nxz7pvq@gem2fvf6FQT"
+DASHBOARD_PATH="monitoring/grafana-dashboard.json"
+DATASOURCE_NAME="Prometheus"
 
 TMP_PAYLOAD="/tmp/grafana_dashboard_payload.json"
 
@@ -18,31 +19,52 @@ echo "=============================================="
 
 # Wait for Grafana to be ready
 echo "⏳ Waiting for Grafana to be ready..."
-until curl -s "$GRAFANA_URL/api/health" > /dev/null 2>&1; do
-    echo "   Waiting for Grafana..."
-    sleep 2
+until curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/health" | grep -q '"database": "ok"'; do
+    echo -n "."
+    sleep 1
 done
 echo "✅ Grafana is ready!"
 
 # Check if dashboard file exists
-if [ ! -f "$DASHBOARD_FILE" ]; then
-    echo "❌ Dashboard file not found: $DASHBOARD_FILE"
+if [ ! -f "$DASHBOARD_PATH" ]; then
+    echo "❌ Dashboard file not found: $DASHBOARD_PATH"
     exit 1
 fi
 
-echo "📋 Importing dashboard from: $DASHBOARD_FILE"
+# Get Prometheus datasource UID from Grafana
+echo "🔎 Finding Prometheus datasource UID..."
+DATASOURCE_UID=$(curl -s -u "$GRAFANA_USER:$GRAFANA_PASS" "$GRAFANA_URL/api/datasources/name/$DATASOURCE_NAME" | jq -r '.uid')
 
-# Read the dashboard JSON and wrap it in the correct API format
-DASH_JSON=$(cat "$DASHBOARD_FILE")
-echo '{"dashboard":' > "$TMP_PAYLOAD"
-echo "$DASH_JSON" >> "$TMP_PAYLOAD"
-echo ', "overwrite": true}' >> "$TMP_PAYLOAD"
+if [ -z "$DATASOURCE_UID" ] || [ "$DATASOURCE_UID" == "null" ]; then
+    echo "❌ Could not find Prometheus datasource named '$DATASOURCE_NAME' in Grafana."
+    exit 1
+fi
+echo "✅ Found Prometheus datasource UID: $DATASOURCE_UID"
 
-# Import the dashboard
+echo "📋 Importing dashboard from: $DASHBOARD_PATH"
+
+# Read the dashboard file and create the final JSON payload using jq
+DASHBOARD_JSON=$(cat "$DASHBOARD_PATH")
+PAYLOAD=$(jq -n \
+  --argjson dashboard "$DASHBOARD_JSON" \
+  --arg ds_uid "$DATASOURCE_UID" \
+  '{
+    dashboard: $dashboard,
+    overwrite: true,
+    inputs: [
+      {
+        name: "DS_PROMETHEUS",
+        type: "datasource",
+        pluginId: "prometheus",
+        value: $ds_uid
+      }
+    ]
+  }')
+
 RESPONSE=$(curl -s -X POST \
     -H "Content-Type: application/json" \
-    -u "$GRAFANA_USER:$GRAFANA_PASSWORD" \
-    -d @"$TMP_PAYLOAD" \
+    -u "$GRAFANA_USER:$GRAFANA_PASS" \
+    -d "$PAYLOAD" \
     "$GRAFANA_URL/api/dashboards/db")
 
 # Clean up temp file

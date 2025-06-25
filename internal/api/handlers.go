@@ -44,7 +44,7 @@ type MatchRequestRequest struct {
 // CreateMatchRequest handles POST /match-request
 func (h *Handler) CreateMatchRequest(c *gin.Context) {
 	start := time.Now()
-	
+
 	var req MatchRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		metrics.RecordHTTPRequest("POST", "/api/v1/match-request", "400", time.Since(start).Seconds())
@@ -245,9 +245,9 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 		}
 
 		matchResults = append(matchResults, gin.H{
-			"match_id":  result.Match.ID,
-			"players":   result.Match.Players,
-			"team_name": result.Match.TeamName,
+			"match_id":   result.Match.ID,
+			"players":    result.Match.Players,
+			"team_name":  result.Match.TeamName,
 			"created_at": result.Match.CreatedAt,
 		})
 	}
@@ -283,11 +283,13 @@ func (h *Handler) AllocateSessions(c *gin.Context) {
 
 	results := make([]gin.H, 0, len(matches))
 	for _, match := range matches {
+		metrics.RecordAllocationRequest(gameID, "requested")
 		session, err := h.allocator.AllocateSession(match)
 		if err != nil {
+			metrics.RecordAllocationError(gameID)
 			results = append(results, gin.H{
 				"match_id": match.ID,
-				"error":   err.Error(),
+				"error":    err.Error(),
 			})
 			continue
 		}
@@ -297,7 +299,6 @@ func (h *Handler) AllocateSessions(c *gin.Context) {
 		})
 	}
 
-	metrics.RecordAllocationRequest(gameID, "requested")
 	metrics.RecordAllocationDuration(gameID, time.Since(start).Seconds())
 	metrics.RecordHTTPRequest("POST", "/api/v1/allocate-sessions", "200", time.Since(start).Seconds())
 
@@ -310,7 +311,7 @@ func (h *Handler) AllocateSessions(c *gin.Context) {
 // GetStats handles GET /stats
 func (h *Handler) GetStats(c *gin.Context) {
 	start := time.Now()
-	
+
 	//ctx := c.Request.Context()
 
 	// Get storage stats
@@ -324,7 +325,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 
 	metrics.RecordHTTPRequest("GET", "/api/v1/stats", "200", time.Since(start).Seconds())
 	c.JSON(http.StatusOK, gin.H{
-		"storage": storageStats,
+		"storage":   storageStats,
 		"timestamp": time.Now(),
 	})
 }
@@ -332,7 +333,7 @@ func (h *Handler) GetStats(c *gin.Context) {
 // HealthCheck handles GET /health
 func (h *Handler) HealthCheck(c *gin.Context) {
 	start := time.Now()
-	
+
 	// Check Redis connection
 	if err := h.storage.Ping(c.Request.Context()); err != nil {
 		metrics.RecordHTTPRequest("GET", "/health", "503", time.Since(start).Seconds())
@@ -345,7 +346,7 @@ func (h *Handler) HealthCheck(c *gin.Context) {
 
 	metrics.RecordHTTPRequest("GET", "/health", "200", time.Since(start).Seconds())
 	c.JSON(http.StatusOK, gin.H{
-		"status": "healthy",
+		"status":    "healthy",
 		"timestamp": time.Now(),
 	})
-} 
+}
