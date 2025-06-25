@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/mm-rules/matchmaking/internal/allocation"
 	"github.com/mm-rules/matchmaking/internal/api"
@@ -149,6 +150,7 @@ func setupRouter(handler *api.Handler) *gin.Engine {
 	// Add middleware
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
+	router.Use(cors.Default())
 
 	// Health check
 	router.GET("/health", handler.HealthCheck)
@@ -175,4 +177,4 @@ func setupRouter(handler *api.Handler) *gin.Engine {
 	}
 
 	return router
-} 
+}
