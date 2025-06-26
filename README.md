@@ -723,4 +723,32 @@ make logs
 
 ## Support
 
-For questions and support, please open an issue on GitHub. 
+For questions and support, please open an issue on GitHub.
+
+## 🖥️ Web Client for Matchmaking Testing
+
+The project includes a modern web client for testing and demonstrating the matchmaking system.
+
+### How to Run the Client
+
+1. Open a terminal and start the backend server (`make run` in the project root).
+2. In another terminal, start the client:
+   ```sh
+   cd mm-rules-client
+   npm install
+   npm run dev
+   ```
+3. Open your browser to the URL shown in the terminal (usually http://localhost:5173/).
+
+### What the Client Demonstrates
+- Join 1v1 or 1v3 game modes with random player metadata.
+- See real-time match status and detailed match information (match ID, all players, team, etc.).
+- Multiple browser windows can be used to simulate multiple players.
+- The client will show full match details for all players as soon as they are matched.
+
+### How to Test
+- Open two browser windows and join the same game mode (e.g., 1v1) in both.
+- Both clients will be matched together and see the same detailed match info.
+- Try 1v3 mode to see team-based matching.
+
+This client is a great way to validate the end-to-end matchmaking flow and visualize the results interactively. 
