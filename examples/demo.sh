@@ -18,26 +18,13 @@ curl -X POST "$BASE_URL/rules/$GAME_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "teams": [
-      { "name": "Solo", "size": 1 },
-      { "name": "Duo", "size": 2 },
-      { "name": "Squad", "size": 4 }
+      { "name": "PlayerA", "size": 1 },
+      { "name": "PlayerB", "size": 1 }
     ],
     "rules": [
       {
         "field": "level",
-        "min": 20,
-        "strict": true,
-        "priority": 10
-      },
-      {
-        "field": "inventory",
-        "contains": "itemA",
-        "relax_after": 10,
-        "priority": 5
-      },
-      {
-        "field": "region",
-        "equals": "us-west",
+        "min": 1,
         "strict": false,
         "priority": 1
       }
