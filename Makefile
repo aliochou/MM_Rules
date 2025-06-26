@@ -1,4 +1,4 @@
-.PHONY: build run test clean docker-build docker-run k8s-deploy k8s-clean demo import-dashboard
+.PHONY: build run test clean docker-build docker-run k8s-deploy k8s-clean demo import-dashboard demo-rules load-rules test-rules manage-rules
 
 # Build the application
 build:
@@ -43,6 +43,22 @@ k8s-clean:
 # Run the demo script
 demo:
 	./examples/demo.sh
+
+# Run the rules demo script
+demo-rules:
+	./examples/rules-demo.sh
+
+# Load predefined rule sets
+load-rules:
+	./scripts/load-rules.sh
+
+# Test rule sets
+test-rules:
+	./scripts/test-rules.sh
+
+# Manage rules (add, edit, delete)
+manage-rules:
+	./scripts/manage-rules.sh
 
 # Install dependencies
 deps:
@@ -122,6 +138,10 @@ help:
 	@echo "  k8s-deploy   - Deploy to Kubernetes"
 	@echo "  k8s-clean    - Clean Kubernetes deployment"
 	@echo "  demo         - Run the demo script"
+	@echo "  demo-rules   - Run the rules demo script"
+	@echo "  load-rules   - Load predefined rule sets"
+	@echo "  test-rules   - Test rule sets"
+	@echo "  manage-rules - Manage rules (add, edit, delete)"
 	@echo "  deps         - Install dependencies"
 	@echo "  fmt          - Format code"
 	@echo "  lint         - Lint code"

@@ -12,6 +12,154 @@ A scalable, rule-driven matchmaking backend for multiplayer games built in Go. T
 - **Redis Storage**: Fast, scalable storage for match requests and game configurations
 - **Kubernetes Ready**: Designed for cloud-native deployment with health checks and metrics
 - **Observability**: Prometheus metrics, structured logging, and health endpoints
+- **Predefined Rule Sets**: Ready-to-use configurations for common matchmaking scenarios
+- **Rule Management Tools**: Scripts and utilities for easy rule configuration and testing
+
+## Quick Start
+
+### Prerequisites
+
+- Go 1.21+
+- Redis 6.0+
+- Docker (optional)
+- Kubernetes cluster (optional)
+- `jq` and `yq` (for rule management scripts)
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd MM_Rules
+   ```
+
+2. **Install dependencies**
+   ```bash
+   go mod download
+   ```
+
+3. **Install optional tools** (for rule management)
+   ```bash
+   # macOS
+   brew install jq yq
+   
+   # Ubuntu/Debian
+   sudo apt-get install jq
+   wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq
+   chmod +x /usr/bin/yq
+   ```
+
+### Local Development
+
+1. **Start Redis**
+   ```bash
+   # Using Docker
+   docker run -d -p 6379:6379 redis:7-alpine
+   
+   # Or using make command
+   make redis
+   ```
+
+2. **Run the server**
+   ```bash
+   # Using Go directly
+   go run cmd/server/main.go
+   
+   # Or using make command
+   make run
+   ```
+
+3. **Load predefined rule sets**
+   ```bash
+   make load-rules
+   ```
+
+4. **Test the system**
+   ```bash
+   make test-rules
+   ```
+
+5. **Run the demo**
+   ```bash
+   make demo-rules
+   ```
+
+The server will start on `http://localhost:8080`
+
+### First Steps
+
+1. **Check server health**
+   ```bash
+   curl http://localhost:8080/health
+   ```
+
+2. **View available rule sets**
+   ```bash
+   ./scripts/manage-rules.sh list
+   ```
+
+3. **Create a match request**
+   ```bash
+   curl -X POST "http://localhost:8080/api/v1/match-request" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "player_id": "player1",
+       "game_id": "game-1v1",
+       "metadata": {
+         "level": 25,
+         "region": "us-west",
+         "skill_rating": 1500
+       }
+     }'
+   ```
+
+## Rule Management
+
+### Overview
+
+The MM-Rules system provides multiple ways to manage matchmaking rules:
+
+- **Predefined Rule Sets**: Ready-to-use configurations for common scenarios
+- **YAML Configuration**: Version-controlled rule definitions
+- **Management Scripts**: Easy-to-use command-line tools
+- **Direct API**: Programmatic rule management
+
+### Quick Rule Management
+
+```bash
+# List all game configurations
+./scripts/manage-rules.sh list
+
+# Show specific game configuration
+./scripts/manage-rules.sh show game-1v1
+
+# Create new game configuration
+./scripts/manage-rules.sh template my-game.yaml
+# Edit my-game.yaml
+./scripts/manage-rules.sh create my-game my-game.yaml
+
+# Update existing configuration
+./scripts/manage-rules.sh update game-1v1 updated-config.yaml
+
+# Delete game configuration
+./scripts/manage-rules.sh delete game-1v1
+```
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `make load-rules` | Load all predefined rule sets |
+| `make test-rules` | Test rule sets with sample data |
+| `make demo-rules` | Run comprehensive demo |
+| `make manage-rules` | Open rule management interface |
+
+### Rule Management Workflow
+
+For detailed information about rule management workflows, see:
+- [Rule Management Workflow](docs/rule-workflow.md) - Comprehensive guide
+- [Quick Reference](docs/quick-reference.md) - Command reference
+- [Rule Sets Documentation](docs/rule-sets.md) - Detailed specifications
 
 ## Architecture
 
@@ -38,66 +186,6 @@ A scalable, rule-driven matchmaking backend for multiplayer games built in Go. T
                     │  (Agones, Unity, etc.)    │
                     └───────────────────────────┘
 ```
-
-## Quick Start
-
-### Prerequisites
-
-- Go 1.21+
-- Redis 6.0+
-- Docker (optional)
-- Kubernetes cluster (optional)
-
-### Local Development
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd MM_Rules
-   ```
-
-2. **Install dependencies**
-   ```bash
-   go mod download
-   ```
-
-3. **Start Redis**
-   ```bash
-   docker run -d -p 6379:6379 redis:7-alpine
-   ```
-
-4. **Run the server**
-   ```bash
-   go run cmd/server/main.go
-   ```
-
-The server will start on `http://localhost:8080`
-
-### Docker Deployment
-
-1. **Build the image**
-   ```bash
-   docker build -t mm-rules-matchmaking .
-   ```
-
-2. **Run the container**
-   ```bash
-   docker run -p 8080:8080 \
-     -e MM_RULES_REDIS_ADDR=host.docker.internal:6379 \
-     mm-rules-matchmaking
-   ```
-
-### Kubernetes Deployment
-
-1. **Apply the manifests**
-   ```bash
-   kubectl apply -f k8s/
-   ```
-
-2. **Check deployment status**
-   ```bash
-   kubectl get pods -l app=mm-rules-matchmaking
-   ```
 
 ## API Reference
 
@@ -305,32 +393,89 @@ The rule engine supports various types of rules:
 ]
 ```
 
-## Session Allocation
+## Predefined Rule Sets
 
-The system integrates with external allocation services via webhooks:
+The system comes with two predefined rule sets for common matchmaking scenarios:
 
-### Allocation Request Format
+### Rule Set #1: 1v1 Matchmaking (`game-1v1`)
 
+**Description**: Competitive 1v1 matchmaking with skill-based matching
+
+**Teams**:
+- Player1 (size: 1)
+- Player2 (size: 1)
+
+**Rules**:
+1. **Level Range**: Players must be level 10-50 (relaxes after 30s)
+2. **Region Preference**: Prefer same region (relaxes after 60s)
+3. **Skill Rating**: Must be 1000-2000 (strict rule)
+
+**Example Player Metadata**:
 ```json
 {
-  "match_id": "match-123",
-  "game_id": "my-game",
-  "players": ["player1", "player2"],
-  "team_name": "Duo"
+  "level": 25,
+  "region": "us-west",
+  "skill_rating": 1500,
+  "preferred_role": "attacker"
 }
 ```
 
-### Allocation Response Format
+### Rule Set #2: 1v3 Matchmaking (`game-1v3`)
 
+**Description**: Team-based 1v3 matchmaking with coordination requirements
+
+**Teams**:
+- Solo (size: 1)
+- Trio (size: 3)
+
+**Rules**:
+1. **Level Range**: Players must be level 15-60 (relaxes after 45s)
+2. **Team Experience**: Minimum experience of 1 (relaxes after 90s)
+3. **Communication**: Must have voice capability (relaxes after 120s)
+
+**Example Player Metadata**:
 ```json
 {
-  "success": true,
-  "session": {
-    "ip": "12.34.56.78",
-    "port": 7777,
-    "id": "session-123"
-  }
+  "level": 35,
+  "team_experience": 5,
+  "communication": ["voice", "text"],
+  "preferred_role": "leader"
 }
+```
+
+### Loading Predefined Rules
+
+Use the configuration loader script to apply these rule sets:
+
+```bash
+# Load all predefined rule sets
+make load-rules
+
+# Or run the demo script that includes both rule sets
+make demo-rules
+```
+
+### Configuration File
+
+Rule sets are defined in `config/game-rules.yaml`:
+
+```yaml
+games:
+  game-1v1:
+    game_id: "game-1v1"
+    description: "1v1 competitive matchmaking with skill-based matching"
+    teams:
+      - name: "Player1"
+        size: 1
+      - name: "Player2"
+        size: 1
+    rules:
+      - field: "level"
+        min: 10
+        max: 50
+        strict: false
+        priority: 1
+        relax_after: 30
 ```
 
 ## Development
@@ -349,21 +494,97 @@ The system integrates with external allocation services via webhooks:
 │   ├── models/         # Data structures
 │   └── storage/        # Redis storage layer
 ├── config/             # Configuration files
+│   ├── config.yaml     # Main system configuration
+│   └── game-rules.yaml # Predefined rule sets
+├── scripts/            # Management scripts
+│   ├── load-rules.sh   # Load rule configurations
+│   ├── test-rules.sh   # Test rule sets
+│   └── manage-rules.sh # Rule management interface
+├── examples/           # Example scripts
+│   ├── demo.sh         # Basic demo
+│   └── rules-demo.sh   # Comprehensive rule demo
+├── docs/               # Documentation
+│   ├── rule-sets.md    # Rule set specifications
+│   ├── rule-workflow.md # Rule management workflow
+│   └── quick-reference.md # Quick reference guide
 ├── k8s/               # Kubernetes manifests
 ├── Dockerfile         # Container definition
 └── README.md          # This file
 ```
 
+### Development Workflow
+
+1. **Start development environment**
+   ```bash
+   make redis        # Start Redis
+   make run          # Start server
+   ```
+
+2. **Load and test rules**
+   ```bash
+   make load-rules   # Load predefined rules
+   make test-rules   # Test rule sets
+   ```
+
+3. **Create new rules**
+   ```bash
+   ./scripts/manage-rules.sh template my-game.yaml
+   # Edit my-game.yaml
+   ./scripts/manage-rules.sh create my-game my-game.yaml
+   ```
+
+4. **Run tests**
+   ```bash
+   go test ./...
+   ```
+
+### Available Make Commands
+
+| Command | Description |
+|---------|-------------|
+| `make run` | Start the server locally |
+| `make build` | Build the application |
+| `make test` | Run all tests |
+| `make test-coverage` | Run tests with coverage |
+| `make load-rules` | Load predefined rule sets |
+| `make test-rules` | Test rule sets |
+| `make demo-rules` | Run comprehensive demo |
+| `make manage-rules` | Open rule management interface |
+| `make redis` | Start Redis container |
+| `make redis-stop` | Stop Redis container |
+| `make monitoring` | Start monitoring stack |
+| `make docker-build` | Build Docker image |
+| `make docker-run` | Run Docker container |
+| `make k8s-deploy` | Deploy to Kubernetes |
+| `make help` | Show all available commands |
+
 ### Running Tests
 
 ```bash
+# Run all tests
 go test ./...
+
+# Run tests with coverage
+make test-coverage
+
+# Test specific package
+go test ./internal/engine
+
+# Test rule sets
+make test-rules
 ```
 
 ### Building
 
 ```bash
+# Build for local platform
 go build -o bin/server cmd/server/main.go
+
+# Or use make
+make build
+
+# Build Docker image
+make docker-build
 ```
 
 ## Monitoring & Observability
@@ -385,6 +606,47 @@ Structured JSON logging with correlation IDs for request tracing.
 
 - `/health`: Basic health check
 - `/metrics`: Prometheus metrics endpoint
+
+### Monitoring Stack
+
+Start the monitoring stack for development:
+
+```bash
+# Start Prometheus and Grafana
+make monitoring
+
+# View logs
+make monitoring-logs
+
+# Open Grafana (macOS)
+make grafana-open
+```
+
+## Deployment
+
+### Docker Deployment
+
+1. **Build the image**
+   ```bash
+   make docker-build
+   ```
+
+2. **Run the container**
+   ```bash
+   make docker-run
+   ```
+
+### Kubernetes Deployment
+
+1. **Apply the manifests**
+   ```bash
+   make k8s-deploy
+   ```
+
+2. **Check deployment status**
+   ```bash
+   kubectl get pods -l app=mm-rules-matchmaking
+   ```
 
 ## Scaling
 
@@ -409,6 +671,30 @@ The system is designed for horizontal scaling:
 - **Authentication**: Can be integrated with existing auth systems
 - **HTTPS**: Recommended for production deployments
 
+## Troubleshooting
+
+### Common Issues
+
+1. **Server won't start**: Check if Redis is running
+2. **Rules not working**: Use `make test-rules` to validate
+3. **Configuration errors**: Check YAML syntax with `yq eval config/game-rules.yaml`
+
+### Debugging Commands
+
+```bash
+# Check server health
+curl http://localhost:8080/health
+
+# View server logs
+make logs
+
+# Check rule configurations
+./scripts/manage-rules.sh list
+
+# Test specific game
+./scripts/manage-rules.sh show game-1v1
+```
+
 ## Contributing
 
 1. Fork the repository
@@ -416,6 +702,20 @@ The system is designed for horizontal scaling:
 3. Make your changes
 4. Add tests
 5. Submit a pull request
+
+### Development Guidelines
+
+- Follow Go coding standards
+- Add tests for new features
+- Update documentation for API changes
+- Use the rule management scripts for testing
+
+## Documentation
+
+- [Rule Sets Documentation](docs/rule-sets.md) - Detailed rule set specifications
+- [Rule Management Workflow](docs/rule-workflow.md) - Complete workflow guide
+- [Quick Reference](docs/quick-reference.md) - Command reference
+- [API Reference](#api-reference) - Complete API documentation
 
 ## License
 

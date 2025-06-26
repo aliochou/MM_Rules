@@ -1,0 +1,103 @@
+# MM-Rules Game Configurations
+# This file contains predefined game rule configurations for different matchmaking scenarios
+
+games:
+  # Rule Set #1: 1v1 Matchmaking
+  game-1v1:
+    game_id: "game-1v1"
+    description: "1v1 competitive matchmaking with skill-based matching"
+    teams:
+      - name: "Player1"
+        size: 1
+      - name: "Player2"
+        size: 1
+    rules:
+      - field: "level"
+        min: 10
+        max: 50
+        strict: false
+        priority: 1
+        relax_after: 30
+        description: "Player level must be between 10-50, relaxes after 30 seconds"
+      
+      - field: "region"
+        equals: "us-west"
+        strict: false
+        priority: 2
+        relax_after: 60
+        description: "Prefer same region, relaxes after 60 seconds"
+      
+      - field: "skill_rating"
+        min: 1000
+        max: 2000
+        strict: true
+        priority: 3
+        description: "Skill rating must be within 1000-2000 range (strict rule)"
+
+  # Rule Set #2: 1v3 Matchmaking
+  game-1v3:
+    game_id: "game-1v3"
+    description: "1v3 team-based matchmaking with coordination requirements"
+    teams:
+      - name: "Solo"
+        size: 1
+      - name: "Trio"
+        size: 3
+    rules:
+      - field: "level"
+        min: 15
+        max: 60
+        strict: false
+        priority: 1
+        relax_after: 45
+        description: "Player level must be between 15-60, relaxes after 45 seconds"
+      
+      - field: "team_experience"
+        min: 1
+        strict: false
+        priority: 2
+        relax_after: 90
+        description: "Minimum team experience of 1, relaxes after 90 seconds"
+      
+      - field: "communication"
+        contains: "voice"
+        strict: false
+        priority: 3
+        relax_after: 120
+        description: "Must have voice communication capability, relaxes after 120 seconds"
+
+# Example player metadata for testing
+example_players:
+  game-1v1:
+    player1:
+      level: 25
+      region: "us-west"
+      skill_rating: 1500
+      preferred_role: "attacker"
+    player2:
+      level: 30
+      region: "us-west"
+      skill_rating: 1600
+      preferred_role: "defender"
+  
+  game-1v3:
+    solo:
+      level: 35
+      team_experience: 5
+      communication: ["voice", "text"]
+      preferred_role: "leader"
+    trio1:
+      level: 28
+      team_experience: 3
+      communication: ["voice"]
+      preferred_role: "support"
+    trio2:
+      level: 32
+      team_experience: 4
+      communication: ["voice", "text"]
+      preferred_role: "attacker"
+    trio3:
+      level: 29
+      team_experience: 2
+      communication: ["voice"]
+      preferred_role: "defender" 
