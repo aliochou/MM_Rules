@@ -34,6 +34,9 @@ if curl -s http://localhost:8080/health > /dev/null 2>&1; then
     echo "📊 Health check: http://localhost:8080/health"
     echo "📈 Metrics: http://localhost:8080/metrics"
     echo ""
+    echo "🔄 Loading rules via ./scripts/load-rules.sh ..."
+    ./scripts/load-rules.sh
+    echo "✅ Rules loaded."
     echo "To stop the server, run: kill $SERVER_PID"
     echo "Or use: ./scripts/stop-server.sh"
 else

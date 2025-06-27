@@ -31,14 +31,17 @@ go mod download
 # Start Redis (if not running)
 make redis
 
-# Start the server
-make run
+# Start the backend (loads rules automatically)
+./scripts/start-server.sh
+# or
+make server-start
 ```
 
 ### 3. Load and Test Rules
 
+# If you started the backend with './scripts/start-server.sh' or 'make server-start', rules are loaded automatically.
+# If you used 'make run', load rules manually:
 ```bash
-# In a new terminal
 make load-rules
 make test-rules
 ```
@@ -83,10 +86,10 @@ MM-Rules is a rule-driven matchmaking system with these key components:
 ```bash
 # Start development environment
 make redis
-make run
+./scripts/start-server.sh   # or: make server-start
 
-# In another terminal, load rules
-make load-rules
+# If you used 'make run', load rules manually:
+# make load-rules
 
 # Make changes to code
 # ...
