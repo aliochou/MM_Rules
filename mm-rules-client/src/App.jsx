@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import reactLogo from './assets/react.svg'
 import viteLogo from '/vite.svg'
 import './App.css'
@@ -32,6 +32,19 @@ function App() {
   const [selectedGameMode, setSelectedGameMode] = useState(null)
   const [currentPlayerId, setCurrentPlayerId] = useState(null)
 
+  // On mount, initialize currentPlayerId from sessionStorage if present
+  useEffect(() => {
+    if (!currentPlayerId && selectedGameMode) {
+      const mode = selectedGameMode === '1v1' ? '1v1' : (selectedGameMode === '1v3' ? '1v3' : selectedGameMode);
+      const storageKey = `playerId-${mode}`;
+      const id = sessionStorage.getItem(storageKey);
+      if (id) {
+        setCurrentPlayerId(id);
+        console.log('[INIT] Loaded playerId from sessionStorage:', id);
+      }
+    }
+  }, [selectedGameMode, currentPlayerId]);
+
   const generatePlayerMetadata = (gameMode) => {
     const baseMetadata = {
       level: Math.floor(Math.random() * 46) + 15, // Random level 15-60 (compatible with 1v3 rules)
@@ -57,10 +70,14 @@ function App() {
   }
 
   function getOrCreatePlayerId(gameMode) {
-    // Enforce strict player ID: always include game mode and a unique random suffix
     const mode = gameMode === '1v1' ? '1v1' : (gameMode === '1v3' ? '1v3' : gameMode);
-    const id = `player-${mode}-${Math.floor(Math.random() * 100000)}-${Date.now()}`;
-    console.log('[PlayerID] Generated player ID:', id);
+    const storageKey = `playerId-${mode}`;
+    let id = sessionStorage.getItem(storageKey);
+    if (!id) {
+      id = `player-${mode}-${Math.floor(Math.random() * 100000)}-${Date.now()}`;
+      sessionStorage.setItem(storageKey, id);
+    }
+    console.log('[PlayerID] Using player ID:', id);
     return id;
   }
 
