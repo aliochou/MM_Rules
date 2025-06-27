@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -153,6 +154,20 @@ func (h *Handler) CreateGameConfig(c *gin.Context) {
 		"rules":   len(config.Rules),
 	}).Info("Created game configuration")
 
+	// Add more detailed logging for debugging
+	h.logger.WithFields(logrus.Fields{
+		"game_id":    config.GameID,
+		"team_count": len(config.Teams),
+		"team_names": func() []string {
+			names := make([]string, len(config.Teams))
+			for i, team := range config.Teams {
+				names[i] = fmt.Sprintf("%s(size:%d)", team.Name, team.Size)
+			}
+			return names
+		}(),
+		"rule_count": len(config.Rules),
+	}).Info("Game config details for matchmaking")
+
 	metrics.RecordHTTPRequest("POST", "/api/v1/rules", "201", time.Since(start).Seconds())
 	c.JSON(http.StatusCreated, gin.H{
 		"game_id": config.GameID,
@@ -232,6 +247,26 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Game configuration not found"})
 		return
 	}
+
+	h.logger.WithFields(logrus.Fields{
+		"game_id": config.GameID,
+		"teams":   config.Teams,
+		"rules":   config.Rules,
+	}).Debug("Loaded game config for matchmaking request")
+
+	// Add more detailed logging for debugging
+	h.logger.WithFields(logrus.Fields{
+		"game_id":    config.GameID,
+		"team_count": len(config.Teams),
+		"team_names": func() []string {
+			names := make([]string, len(config.Teams))
+			for i, team := range config.Teams {
+				names[i] = fmt.Sprintf("%s(size:%d)", team.Name, team.Size)
+			}
+			return names
+		}(),
+		"rule_count": len(config.Rules),
+	}).Info("Game config details for matchmaking")
 
 	requests, err := h.storage.GetGameQueue(c.Request.Context(), gameID)
 	if err != nil {

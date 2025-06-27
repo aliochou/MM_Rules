@@ -11,7 +11,7 @@ allocation:
   webhook_url: http://localhost:8081/allocate
 
 log:
-  level: info  # debug, info, warn, error
+  level: debug  # debug, info, warn, error
 
 # Matchmaking settings
 matchmaking:

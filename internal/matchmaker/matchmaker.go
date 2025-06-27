@@ -188,10 +188,12 @@ done:
 // ProcessFullTeamMatchPool processes a pool of players and forms matches only when all teams can be filled
 // This is now the same as ProcessMatchPool - kept for backward compatibility
 func (m *Matchmaker) ProcessFullTeamMatchPool(players []*models.MatchRequest, config *models.GameConfig) []*models.MultiTeamMatch {
+	fmt.Printf("[MM] Starting ProcessFullTeamMatchPool: %d players, %d teams\n", len(players), len(config.Teams))
 	var matches []*models.MultiTeamMatch
 	usedPlayers := make(map[string]bool)
 	teamCount := len(config.Teams)
 	if teamCount == 0 {
+		fmt.Println("[MM] No teams in config, aborting.")
 		return matches
 	}
 	// Continue forming matches while all teams can be filled
@@ -201,13 +203,16 @@ func (m *Matchmaker) ProcessFullTeamMatchPool(players []*models.MatchRequest, co
 		// For each team, try to select enough compatible players
 		for _, team := range config.Teams {
 			available := m.getAvailablePlayers(players, usedPlayers)
+			fmt.Printf("[MM] Team %s: need %d, available %d\n", team.Name, team.Size, len(available))
 			if len(available) < team.Size {
+				fmt.Printf("[MM] Not enough players for team %s: have %d, need %d\n", team.Name, len(available), team.Size)
 				goto done // Not enough players for this team
 			}
 			// Find compatible players for this team
 			oldest := m.findOldestPlayer(available)
 			elapsed := time.Since(oldest.CreatedAt)
 			compatible := m.ruleEngine.FindCompatiblePlayers(available, config.Rules, elapsed)
+			fmt.Printf("[MM] Team %s: compatible %d\n", team.Name, len(compatible))
 			// Remove already selected in this round
 			var filtered []*models.MatchRequest
 			for _, p := range compatible {
@@ -215,7 +220,9 @@ func (m *Matchmaker) ProcessFullTeamMatchPool(players []*models.MatchRequest, co
 					filtered = append(filtered, p)
 				}
 			}
+			fmt.Printf("[MM] Team %s: filtered %d\n", team.Name, len(filtered))
 			if len(filtered) < team.Size {
+				fmt.Printf("[MM] Not enough compatible players for team %s after filtering: have %d, need %d\n", team.Name, len(filtered), team.Size)
 				goto done // Not enough compatible players for this team
 			}
 			// Select the best players for this team
@@ -233,6 +240,7 @@ func (m *Matchmaker) ProcessFullTeamMatchPool(players []*models.MatchRequest, co
 				teamMap[teamName] = append(teamMap[teamName], req.PlayerID)
 			}
 		}
+		fmt.Printf("[MM] Forming match: %v\n", teamMap)
 		match := &models.MultiTeamMatch{
 			ID:        models.NewMatch(config.GameID, "multi", nil).ID, // reuse uuid
 			GameID:    config.GameID,
@@ -242,6 +250,7 @@ func (m *Matchmaker) ProcessFullTeamMatchPool(players []*models.MatchRequest, co
 		matches = append(matches, match)
 	}
 done:
+	fmt.Printf("[MM] Done. Formed %d matches.\n", len(matches))
 	return matches
 }
 
