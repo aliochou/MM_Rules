@@ -1,4 +1,4 @@
-.PHONY: build run test clean docker-build docker-run k8s-deploy k8s-clean demo import-dashboard demo-rules load-rules test-rules manage-rules
+.PHONY: build run test clean docker-build docker-run k8s-deploy k8s-clean demo import-dashboard demo-rules load-rules test-rules manage-rules server-start server-stop server-restart
 
 # Build the application
 build:
@@ -55,6 +55,10 @@ load-rules:
 # Test rule sets
 test-rules:
 	./scripts/test-rules.sh
+
+# Test client functionality
+test-client:
+	./scripts/test-client.sh
 
 # Manage rules (add, edit, delete)
 manage-rules:
@@ -130,6 +134,9 @@ help:
 	@echo "Available commands:"
 	@echo "  build        - Build the application"
 	@echo "  run          - Run the application locally"
+	@echo "  server-start - Start server with process management"
+	@echo "  server-stop  - Stop server"
+	@echo "  server-restart - Restart server"
 	@echo "  test         - Run tests"
 	@echo "  test-coverage- Run tests with coverage"
 	@echo "  clean        - Clean build artifacts"
@@ -141,6 +148,7 @@ help:
 	@echo "  demo-rules   - Run the rules demo script"
 	@echo "  load-rules   - Load predefined rule sets"
 	@echo "  test-rules   - Test rule sets"
+	@echo "  test-client  - Test client functionality"
 	@echo "  manage-rules - Manage rules (add, edit, delete)"
 	@echo "  deps         - Install dependencies"
 	@echo "  fmt          - Format code"
@@ -158,4 +166,18 @@ help:
 	@echo "  prometheus-open - Open Prometheus in browser"
 	@echo "  grafana-open - Open Grafana in browser"
 	@echo "  import-dashboard - Import Grafana dashboard"
-	@echo "  help         - Show this help" 
+	@echo "  help         - Show this help"
+
+# Start server with process management
+server-start:
+	./scripts/start-server.sh
+
+# Stop server
+server-stop:
+	./scripts/stop-server.sh
+
+# Restart server
+server-restart:
+	./scripts/stop-server.sh
+	sleep 2
+	./scripts/start-server.sh 

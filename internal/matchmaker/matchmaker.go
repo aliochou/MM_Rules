@@ -24,122 +24,225 @@ func NewMatchmaker() *Matchmaker {
 // MatchWithRequests represents a match and the corresponding match requests
 // that were used to form it.
 type MatchWithRequests struct {
-	Match         *models.Match
-	RequestIDs    []string
+	Match      *models.Match
+	RequestIDs []string
+}
+
+// MultiTeamMatch represents a match with multiple teams
+// (new struct for multi-team matches)
+type MultiTeamMatch struct {
+	ID        string              `json:"id"`
+	GameID    string              `json:"game_id"`
+	Teams     map[string][]string `json:"teams"` // team name -> player IDs
+	CreatedAt time.Time           `json:"created_at"`
+	Session   *models.GameSession `json:"session,omitempty"`
 }
 
 // ProcessMatchPool processes a pool of players and attempts to form matches
+// Now uses full-team matching by default - only creates matches when all teams can be filled
 func (m *Matchmaker) ProcessMatchPool(players []*models.MatchRequest, config *models.GameConfig) []*models.Match {
 	var matches []*models.Match
 	usedPlayers := make(map[string]bool)
-
-	// Sort teams by size (largest first) to prioritize larger matches
-	sortedTeams := make([]models.Team, len(config.Teams))
-	copy(sortedTeams, config.Teams)
-	sort.Slice(sortedTeams, func(i, j int) bool {
-		return sortedTeams[i].Size > sortedTeams[j].Size
-	})
-
-	for _, team := range sortedTeams {
-		matches = append(matches, m.formMatchesForTeam(players, config, team, usedPlayers)...)
+	teamCount := len(config.Teams)
+	if teamCount == 0 {
+		return matches
 	}
 
+	// Continue forming matches while all teams can be filled
+	for {
+		selected := make(map[string][]*models.MatchRequest) // team name -> players
+		usedInThisRound := make(map[string]bool)
+
+		// For each team, try to select enough compatible players
+		for _, team := range config.Teams {
+			available := m.getAvailablePlayers(players, usedPlayers)
+			if len(available) < team.Size {
+				goto done // Not enough players for this team
+			}
+
+			// Find compatible players for this team
+			oldest := m.findOldestPlayer(available)
+			elapsed := time.Since(oldest.CreatedAt)
+			compatible := m.ruleEngine.FindCompatiblePlayers(available, config.Rules, elapsed)
+
+			// Remove already selected in this round
+			var filtered []*models.MatchRequest
+			for _, p := range compatible {
+				if !usedInThisRound[p.ID] {
+					filtered = append(filtered, p)
+				}
+			}
+
+			if len(filtered) < team.Size {
+				goto done // Not enough compatible players for this team
+			}
+
+			// Select the best players for this team
+			selectedPlayers := m.selectBestPlayers(filtered, team.Size, oldest.CreatedAt)
+			selected[team.Name] = selectedPlayers
+			for _, p := range selectedPlayers {
+				usedInThisRound[p.ID] = true
+			}
+		}
+
+		// If we get here, all teams are filled - create a single match with all players
+		allPlayerIDs := make([]string, 0)
+		for _, reqs := range selected {
+			for _, req := range reqs {
+				usedPlayers[req.ID] = true
+				allPlayerIDs = append(allPlayerIDs, req.PlayerID)
+			}
+		}
+
+		// Create a single match containing all players from all teams
+		// Use the first team name as the match team name for backward compatibility
+		firstTeamName := config.Teams[0].Name
+		match := models.NewMatch(config.GameID, firstTeamName, allPlayerIDs)
+		matches = append(matches, match)
+	}
+done:
 	return matches
 }
 
 // ProcessMatchPoolWithRequests processes a pool of players and attempts to form matches,
 // returning both the matches and the request IDs for each match.
+// Now uses full-team matching by default
 func (m *Matchmaker) ProcessMatchPoolWithRequests(players []*models.MatchRequest, config *models.GameConfig) []MatchWithRequests {
 	var results []MatchWithRequests
 	usedPlayers := make(map[string]bool)
-
-	// Sort teams by size (largest first) to prioritize larger matches
-	sortedTeams := make([]models.Team, len(config.Teams))
-	copy(sortedTeams, config.Teams)
-	sort.Slice(sortedTeams, func(i, j int) bool {
-		return sortedTeams[i].Size > sortedTeams[j].Size
-	})
-
-	for _, team := range sortedTeams {
-		results = append(results, m.formMatchesForTeamWithRequests(players, config, team, usedPlayers)...)
+	teamCount := len(config.Teams)
+	if teamCount == 0 {
+		return results
 	}
 
-	return results
-}
+	// Continue forming matches while all teams can be filled
+	for {
+		// Log the number of requests being processed
+		fmt.Printf("[Matchmaker] Processing %d requests\n", len(players))
 
-// formMatchesForTeam attempts to form matches for a specific team configuration
-func (m *Matchmaker) formMatchesForTeam(
-	players []*models.MatchRequest,
-	config *models.GameConfig,
-	team models.Team,
-	usedPlayers map[string]bool,
-) []*models.Match {
-	var matches []*models.Match
-	availablePlayers := m.getAvailablePlayers(players, usedPlayers)
+		selected := make(map[string][]*models.MatchRequest) // team name -> players
+		usedInThisRound := make(map[string]bool)
 
-	// Continue forming matches while we have enough players
-	for len(availablePlayers) >= team.Size {
-		// Calculate elapsed time for rule relaxation
-		oldestPlayer := m.findOldestPlayer(availablePlayers)
-		elapsedTime := time.Since(oldestPlayer.CreatedAt)
+		// For each team, try to select enough compatible players
+		for _, team := range config.Teams {
+			available := m.getAvailablePlayers(players, usedPlayers)
+			if len(available) < team.Size {
+				fmt.Printf("[Matchmaker] Not enough available players for team %s: have %d, need %d\n", team.Name, len(available), team.Size)
+				goto done // Not enough players for this team
+			}
 
-		// Find compatible players for this team
-		compatiblePlayers := m.ruleEngine.FindCompatiblePlayers(availablePlayers, config.Rules, elapsedTime)
+			// Find compatible players for this team
+			oldest := m.findOldestPlayer(available)
+			elapsed := time.Since(oldest.CreatedAt)
+			compatible := m.ruleEngine.FindCompatiblePlayers(available, config.Rules, elapsed)
 
-		if len(compatiblePlayers) < team.Size {
-			break // Not enough compatible players
+			// Remove already selected in this round
+			var filtered []*models.MatchRequest
+			for _, p := range compatible {
+				if !usedInThisRound[p.ID] {
+					filtered = append(filtered, p)
+				}
+			}
+
+			if len(filtered) < team.Size {
+				fmt.Printf("[Matchmaker] Not enough compatible players for team %s after filtering: have %d, need %d\n", team.Name, len(filtered), team.Size)
+				goto done // Not enough compatible players for this team
+			}
+
+			// Select the best players for this team
+			selectedPlayers := m.selectBestPlayers(filtered, team.Size, oldest.CreatedAt)
+			selected[team.Name] = selectedPlayers
+			for _, p := range selectedPlayers {
+				usedInThisRound[p.ID] = true
+			}
 		}
 
-		// Select the best players for this team
-		selectedPlayers := m.selectBestPlayers(compatiblePlayers, team.Size, oldestPlayer.CreatedAt)
-
-		// Create the match
-		match := models.NewMatch(config.GameID, team.Name, m.getPlayerIDs(selectedPlayers))
-		matches = append(matches, match)
-
-		// Mark selected players as used
-		for _, player := range selectedPlayers {
-			usedPlayers[player.ID] = true
+		// If we get here, all teams are filled - create a single match with all players and request IDs
+		allPlayerIDs := make([]string, 0)
+		allRequestIDs := make([]string, 0)
+		playerIDSet := make(map[string]bool)
+		for _, reqs := range selected {
+			for _, req := range reqs {
+				usedPlayers[req.ID] = true // Mark this player as used
+				if !playerIDSet[req.PlayerID] {
+					allPlayerIDs = append(allPlayerIDs, req.PlayerID)
+					playerIDSet[req.PlayerID] = true
+				}
+				allRequestIDs = append(allRequestIDs, req.ID)
+			}
 		}
+		fmt.Printf("[Matchmaker] Forming match with unique player IDs: %v\n", allPlayerIDs)
 
-		// Update available players list
-		availablePlayers = m.getAvailablePlayers(players, usedPlayers)
-	}
-
-	return matches
-}
-
-// formMatchesForTeamWithRequests forms matches for a team and returns both the match and the request IDs.
-func (m *Matchmaker) formMatchesForTeamWithRequests(
-	players []*models.MatchRequest,
-	config *models.GameConfig,
-	team models.Team,
-	usedPlayers map[string]bool,
-) []MatchWithRequests {
-	var results []MatchWithRequests
-	availablePlayers := m.getAvailablePlayers(players, usedPlayers)
-
-	for len(availablePlayers) >= team.Size {
-		oldestPlayer := m.findOldestPlayer(availablePlayers)
-		elapsedTime := time.Since(oldestPlayer.CreatedAt)
-		compatiblePlayers := m.ruleEngine.FindCompatiblePlayers(availablePlayers, config.Rules, elapsedTime)
-		if len(compatiblePlayers) < team.Size {
-			break
-		}
-		selectedPlayers := m.selectBestPlayers(compatiblePlayers, team.Size, oldestPlayer.CreatedAt)
-		match := models.NewMatch(config.GameID, team.Name, m.getPlayerIDs(selectedPlayers))
-		requestIDs := make([]string, len(selectedPlayers))
-		for i, player := range selectedPlayers {
-			usedPlayers[player.ID] = true
-			requestIDs[i] = player.ID
-		}
+		// Create a single match containing all players from all teams
+		firstTeamName := config.Teams[0].Name
+		match := models.NewMatch(config.GameID, firstTeamName, allPlayerIDs)
 		results = append(results, MatchWithRequests{
 			Match:      match,
-			RequestIDs: requestIDs,
+			RequestIDs: allRequestIDs,
 		})
-		availablePlayers = m.getAvailablePlayers(players, usedPlayers)
 	}
+done:
 	return results
+}
+
+// ProcessFullTeamMatchPool processes a pool of players and forms matches only when all teams can be filled
+// This is now the same as ProcessMatchPool - kept for backward compatibility
+func (m *Matchmaker) ProcessFullTeamMatchPool(players []*models.MatchRequest, config *models.GameConfig) []*models.MultiTeamMatch {
+	var matches []*models.MultiTeamMatch
+	usedPlayers := make(map[string]bool)
+	teamCount := len(config.Teams)
+	if teamCount == 0 {
+		return matches
+	}
+	// Continue forming matches while all teams can be filled
+	for {
+		selected := make(map[string][]*models.MatchRequest) // team name -> players
+		usedInThisRound := make(map[string]bool)
+		// For each team, try to select enough compatible players
+		for _, team := range config.Teams {
+			available := m.getAvailablePlayers(players, usedPlayers)
+			if len(available) < team.Size {
+				goto done // Not enough players for this team
+			}
+			// Find compatible players for this team
+			oldest := m.findOldestPlayer(available)
+			elapsed := time.Since(oldest.CreatedAt)
+			compatible := m.ruleEngine.FindCompatiblePlayers(available, config.Rules, elapsed)
+			// Remove already selected in this round
+			var filtered []*models.MatchRequest
+			for _, p := range compatible {
+				if !usedInThisRound[p.ID] {
+					filtered = append(filtered, p)
+				}
+			}
+			if len(filtered) < team.Size {
+				goto done // Not enough compatible players for this team
+			}
+			// Select the best players for this team
+			selectedPlayers := m.selectBestPlayers(filtered, team.Size, oldest.CreatedAt)
+			selected[team.Name] = selectedPlayers
+			for _, p := range selectedPlayers {
+				usedInThisRound[p.ID] = true
+			}
+		}
+		// If we get here, all teams are filled
+		teamMap := make(map[string][]string)
+		for teamName, reqs := range selected {
+			for _, req := range reqs {
+				usedPlayers[req.ID] = true
+				teamMap[teamName] = append(teamMap[teamName], req.PlayerID)
+			}
+		}
+		match := &models.MultiTeamMatch{
+			ID:        models.NewMatch(config.GameID, "multi", nil).ID, // reuse uuid
+			GameID:    config.GameID,
+			Teams:     teamMap,
+			CreatedAt: time.Now(),
+		}
+		matches = append(matches, match)
+	}
+done:
+	return matches
 }
 
 // getAvailablePlayers returns players that haven't been used in matches yet
@@ -218,7 +321,7 @@ func (m *Matchmaker) ValidateMatch(match *models.Match, config *models.GameConfi
 // GetMatchStats returns statistics about the matchmaking process
 func (m *Matchmaker) GetMatchStats(players []*models.MatchRequest, matches []*models.Match) map[string]interface{} {
 	stats := make(map[string]interface{})
-	
+
 	// Calculate wait times
 	var waitTimes []float64
 	now := time.Now()
@@ -274,4 +377,13 @@ func (m *Matchmaker) countMatchedPlayers(matches []*models.Match) int {
 		count += len(match.Players)
 	}
 	return count
-} 
+}
+
+// FlattenTeams flattens all player IDs for all teams
+func (m *Matchmaker) FlattenTeams(teams map[string][]string) []string {
+	var all []string
+	for _, players := range teams {
+		all = append(all, players...)
+	}
+	return all
+}

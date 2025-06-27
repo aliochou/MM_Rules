@@ -34,7 +34,7 @@ function App() {
 
   const generatePlayerMetadata = (gameMode) => {
     const baseMetadata = {
-      level: Math.floor(Math.random() * 50) + 10, // Random level 10-60
+      level: Math.floor(Math.random() * 46) + 15, // Random level 15-60 (compatible with 1v3 rules)
       region: 'us-west',
     }
 
@@ -56,6 +56,14 @@ function App() {
     return baseMetadata
   }
 
+  function getOrCreatePlayerId(gameMode) {
+    // Enforce strict player ID: always include game mode and a unique random suffix
+    const mode = gameMode === '1v1' ? '1v1' : (gameMode === '1v3' ? '1v3' : gameMode);
+    const id = `player-${mode}-${Math.floor(Math.random() * 100000)}-${Date.now()}`;
+    console.log('[PlayerID] Generated player ID:', id);
+    return id;
+  }
+
   const joinGameMode = async (gameMode) => {
     const gameConfig = GAME_MODES[gameMode]
     if (!gameConfig) {
@@ -63,7 +71,7 @@ function App() {
       return
     }
 
-    const playerId = `player-${gameMode}-${Math.floor(Math.random() * 100000)}`
+    const playerId = getOrCreatePlayerId(gameMode)
     setStatus(`Joining ${gameConfig.name}...`)
     setSession(null)
     setMatchInfo(null)
@@ -71,6 +79,7 @@ function App() {
     setRequestId(null)
     setSelectedGameMode(gameMode)
     setCurrentPlayerId(playerId)
+    console.log('[JOIN] playerId:', playerId, 'gameMode:', gameMode)
 
     try {
       // Step 1: Create match request
@@ -87,6 +96,7 @@ function App() {
       const data = await res.json()
       if (!data.request_id) throw new Error('No request_id returned')
       setRequestId(data.request_id)
+      console.log('[JOIN] Received request_id:', data.request_id)
       setStatus(`Waiting for ${gameConfig.name} match...`)
       
       // Step 2: Trigger matchmaking processing
@@ -94,6 +104,7 @@ function App() {
         method: 'POST' 
       })
       const matchmakingData = await matchmakingRes.json()
+      console.log('[JOIN] Matchmaking response:', matchmakingData)
       
       // Find the match that contains our player
       if (matchmakingData.matches && matchmakingData.matches.length > 0) {
@@ -111,8 +122,10 @@ function App() {
             playerId: playerId
           })
           setStatus(`Match found! ${gameConfig.name}`)
+          console.log('[JOIN] Found playerMatch:', playerMatch)
         } else {
           setStatus('Match created but player not found in any match')
+          console.log('[JOIN] Player not found in any match')
         }
       }
       
@@ -121,6 +134,7 @@ function App() {
     } catch (err) {
       setStatus('Error: ' + err.message)
       setLoading(false)
+      console.error('[JOIN] Error:', err)
     }
   }
 
@@ -133,44 +147,37 @@ function App() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/match-status/${reqId}`)
       const data = await res.json()
+      console.log('[POLL] reqId:', reqId, 'currentPlayerId:', currentPlayerId, 'status:', data.status, 'players:', data.players, 'all_players:', data.all_players)
       if (data.status === 'matched' || data.status === 'allocated') {
-        // Always fetch match info from the backend when matched
-        try {
-          const matchmakingRes = await fetch(`${BACKEND_URL}/api/v1/process-matchmaking/${gameId}`, { 
-            method: 'POST' 
+        // Use match info from backend response if available
+        if (data.match_id && data.players && data.players.length > 0 && data.team_name && data.created_at) {
+          setMatchInfo({
+            matchId: data.match_id,
+            players: data.players,
+            teamName: data.team_name,
+            createdAt: data.created_at,
+            gameMode: selectedGameMode,
+            playerId: currentPlayerId,
+            allPlayers: data.all_players || null,
           })
-          const matchmakingData = await matchmakingRes.json()
-          // Find the match that contains our player
-          if (matchmakingData.matches && matchmakingData.matches.length > 0) {
-            const playerMatch = matchmakingData.matches.find(match => 
-              match.players && match.players.includes(currentPlayerId)
-            )
-            if (playerMatch) {
-              setMatchInfo({
-                matchId: playerMatch.match_id,
-                players: playerMatch.players,
-                teamName: playerMatch.team_name,
-                createdAt: playerMatch.created_at,
-                gameMode: selectedGameMode,
-                playerId: currentPlayerId
-              })
-            }
+          setStatus('Match found!')
+          if (data.session) {
+            setSession(data.session)
+            setStatus('Match is running!')
           }
-        } catch (err) {
-          console.log('Could not fetch match details:', err)
+          setLoading(false)
+          return
+        } else {
+          // If required fields are missing, keep polling
+          setTimeout(() => pollStatus(reqId, attempt + 1, gameId), 1000)
+          return
         }
-        setStatus('Match found!')
-        if (data.session) {
-          setSession(data.session)
-          setStatus('Match is running!')
-        }
-        setLoading(false)
-        return
       }
       setTimeout(() => pollStatus(reqId, attempt + 1, gameId), 1000)
     } catch (err) {
       setStatus('Error polling status: ' + err.message)
       setLoading(false)
+      console.error('[POLL] Error:', err)
     }
   }
 
@@ -300,7 +307,7 @@ function App() {
       
       {/* Match Information */}
       {matchInfo && (
-        <div style={{ 
+        <div style={{
           marginTop: '20px', 
           fontSize: '16px', 
           padding: '24px', 
@@ -318,108 +325,42 @@ function App() {
           }}>
             🎮 Match Found!
           </h3>
-          
           <div style={{ display: 'grid', gap: '12px' }}>
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              padding: '8px 0',
-              borderBottom: '1px solid #e0e0e0'
-            }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e0e0e0' }}>
               <strong>Match ID:</strong>
-              <span style={{ fontFamily: 'monospace', color: '#2c3e50' }}>
-                {matchInfo.matchId}
-              </span>
+              <span style={{ fontFamily: 'monospace', color: '#2c3e50' }}>{matchInfo.matchId}</span>
             </div>
-            
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              padding: '8px 0',
-              borderBottom: '1px solid #e0e0e0'
-            }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e0e0e0' }}>
               <strong>Game Mode:</strong>
-              <span style={{ color: '#3498db', fontWeight: 'bold' }}>
-                {GAME_MODES[matchInfo.gameMode].name}
-              </span>
+              <span style={{ color: '#3498db', fontWeight: 'bold' }}>{GAME_MODES[matchInfo.gameMode]?.name || matchInfo.gameMode}</span>
             </div>
-            
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              padding: '8px 0',
-              borderBottom: '1px solid #e0e0e0'
-            }}>
-              <strong>Your Team:</strong>
-              <span style={{ 
-                color: '#e74c3c', 
-                fontWeight: 'bold',
-                backgroundColor: '#fdf2f2',
-                padding: '4px 8px',
-                borderRadius: '4px'
-              }}>
-                {getTeamDisplayName(matchInfo.teamName, matchInfo.gameMode)}
-              </span>
-            </div>
-            
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              padding: '8px 0',
-              borderBottom: '1px solid #e0e0e0'
-            }}>
+            {matchInfo.teamName && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e0e0e0' }}>
+                <strong>Your Team:</strong>
+                <span style={{ color: '#e74c3c', fontWeight: 'bold', backgroundColor: '#fdf2f2', padding: '4px 8px', borderRadius: '4px' }}>{getTeamDisplayName(matchInfo.teamName, matchInfo.gameMode)}</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e0e0e0' }}>
               <strong>Your Player ID:</strong>
-              <span style={{ 
-                fontFamily: 'monospace', 
-                color: '#2c3e50',
-                fontSize: '14px'
-              }}>
-                {matchInfo.playerId}
-              </span>
+              <span style={{ fontFamily: 'monospace', color: '#2c3e50', fontSize: '14px' }}>{matchInfo.playerId}</span>
             </div>
-            
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              padding: '8px 0',
-              borderBottom: '1px solid #e0e0e0'
-            }}>
-              <strong>Team Size:</strong>
-              <span style={{ color: '#2c3e50' }}>
-                {getTeamSize(matchInfo.teamName, matchInfo.gameMode)} player(s)
-              </span>
-            </div>
-            
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              padding: '8px 0',
-              borderBottom: '1px solid #e0e0e0'
-            }}>
+            {matchInfo.teamName && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e0e0e0' }}>
+                <strong>Team Size:</strong>
+                <span style={{ color: '#2c3e50' }}>{matchInfo.players ? matchInfo.players.length : 1} player(s)</span>
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e0e0e0' }}>
               <strong>Total Players:</strong>
-              <span style={{ color: '#2c3e50' }}>
-                {matchInfo.players.length} player(s)
-              </span>
+              <span style={{ color: '#2c3e50' }}>{matchInfo.allPlayers ? matchInfo.allPlayers.length : (matchInfo.players ? matchInfo.players.length : 1)} player(s)</span>
             </div>
           </div>
-          
-          <div style={{ 
-            marginTop: '16px',
-            padding: '12px',
-            backgroundColor: '#f0f8ff',
-            borderRadius: '8px',
-            border: '1px solid #3498db'
-          }}>
-            <strong style={{ color: '#3498db', display: 'block', marginBottom: '8px' }}>
-              All Players in Match:
-            </strong>
-            <div style={{ 
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: '8px'
-            }}>
-              {matchInfo.players.map((player, index) => (
-                <div key={index} style={{ 
+          {/* Teammates */}
+          <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#f0f8ff', borderRadius: '8px', border: '1px solid #3498db' }}>
+            <strong style={{ color: '#3498db', display: 'block', marginBottom: '8px' }}>My Teammates:</strong>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' }}>
+              {matchInfo.players && matchInfo.players.map((player, index) => (
+                <div key={index} style={{
                   padding: '8px 12px',
                   backgroundColor: player === matchInfo.playerId ? '#e8f5e8' : '#f8f9fa',
                   borderRadius: '6px',
@@ -428,24 +369,56 @@ function App() {
                   fontWeight: '500',
                   border: player === matchInfo.playerId ? '2px solid #27ae60' : '1px solid #e0e0e0',
                   color: '#2c3e50',
-                  textAlign: 'center'
+                  textAlign: 'center',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px'
                 }}>
-                  {player === matchInfo.playerId ? '👤 ' : '• '}{player}
+                  {player === matchInfo.playerId ? (
+                    <>
+                      <span style={{fontWeight: 'bold', color: '#27ae60'}}>👤 {player}</span>
+                      <span style={{ backgroundColor: '#27ae60', color: 'white', borderRadius: '4px', padding: '2px 6px', fontSize: '12px', marginLeft: '6px' }}>You</span>
+                    </>
+                  ) : (
+                    <>• {player}</>
+                  )}
                 </div>
               ))}
             </div>
           </div>
-          
-          <div style={{ 
-            marginTop: '12px', 
-            fontSize: '14px', 
-            color: '#7f8c8d',
-            textAlign: 'center',
-            fontStyle: 'italic',
-            fontFamily: 'Arial, sans-serif'
-          }}>
-            Created: {new Date(matchInfo.createdAt).toLocaleString()}
-          </div>
+          {/* Opposing team (optional) */}
+          {matchInfo.allPlayers && matchInfo.players && matchInfo.allPlayers.length > matchInfo.players.length && (
+            <div style={{ marginTop: '16px', padding: '12px', backgroundColor: '#fff6f0', borderRadius: '8px', border: '1px solid #e67e22' }}>
+              <strong style={{ color: '#e67e22', display: 'block', marginBottom: '8px' }}>Opposing Team:</strong>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' }}>
+                {matchInfo.allPlayers.filter(pid => !matchInfo.players.includes(pid)).map((player, index) => (
+                  <div key={index} style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#fbeee6',
+                    borderRadius: '6px',
+                    fontSize: '16px',
+                    fontFamily: 'Arial, sans-serif',
+                    fontWeight: '500',
+                    border: '1px solid #e0e0e0',
+                    color: '#2c3e50',
+                    textAlign: 'center',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px'
+                  }}>
+                    • {player}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {matchInfo.createdAt && (
+            <div style={{ marginTop: '12px', fontSize: '14px', color: '#7f8c8d', textAlign: 'center', fontStyle: 'italic', fontFamily: 'Arial, sans-serif' }}>
+              Created: {new Date(matchInfo.createdAt).toLocaleString()}
+            </div>
+          )}
         </div>
       )}
       

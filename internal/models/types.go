@@ -20,17 +20,17 @@ type MatchRequest struct {
 type MatchStatus string
 
 const (
-	StatusPending  MatchStatus = "pending"
-	StatusMatched  MatchStatus = "matched"
+	StatusPending   MatchStatus = "pending"
+	StatusMatched   MatchStatus = "matched"
 	StatusAllocated MatchStatus = "allocated"
-	StatusFailed   MatchStatus = "failed"
+	StatusFailed    MatchStatus = "failed"
 )
 
 // GameConfig represents the rules and team configuration for a game
 type GameConfig struct {
-	GameID string     `json:"game_id"`
-	Teams  []Team     `json:"teams"`
-	Rules  []Rule     `json:"rules"`
+	GameID    string    `json:"game_id"`
+	Teams     []Team    `json:"teams"`
+	Rules     []Rule    `json:"rules"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
@@ -42,24 +42,24 @@ type Team struct {
 
 // Rule represents a matchmaking rule
 type Rule struct {
-	Field       string      `json:"field"`
-	Min         *int        `json:"min,omitempty"`
-	Max         *int        `json:"max,omitempty"`
-	Contains    *string     `json:"contains,omitempty"`
-	Equals      *string     `json:"equals,omitempty"`
-	Strict      bool        `json:"strict"`
-	RelaxAfter  *int        `json:"relax_after,omitempty"` // seconds
-	Priority    int         `json:"priority"`              // higher = more important
+	Field      string  `json:"field"`
+	Min        *int    `json:"min,omitempty"`
+	Max        *int    `json:"max,omitempty"`
+	Contains   *string `json:"contains,omitempty"`
+	Equals     *string `json:"equals,omitempty"`
+	Strict     bool    `json:"strict"`
+	RelaxAfter *int    `json:"relax_after,omitempty"` // seconds
+	Priority   int     `json:"priority"`              // higher = more important
 }
 
 // Match represents a successful match of players
 type Match struct {
-	ID        string         `json:"id"`
-	GameID    string         `json:"game_id"`
-	TeamName  string         `json:"team_name"`
-	Players   []string       `json:"players"`
-	CreatedAt time.Time      `json:"created_at"`
-	Session   *GameSession   `json:"session,omitempty"`
+	ID        string       `json:"id"`
+	GameID    string       `json:"game_id"`
+	TeamName  string       `json:"team_name"`
+	Players   []string     `json:"players"`
+	CreatedAt time.Time    `json:"created_at"`
+	Session   *GameSession `json:"session,omitempty"`
 }
 
 // GameSession represents the allocated game session
@@ -69,20 +69,35 @@ type GameSession struct {
 	ID   string `json:"id"`
 }
 
+// MultiTeamMatch represents a match with multiple teams
+// team name -> player IDs
+type MultiTeamMatch struct {
+	ID        string              `json:"id"`
+	GameID    string              `json:"game_id"`
+	Teams     map[string][]string `json:"teams"` // team name -> player IDs
+	CreatedAt time.Time           `json:"created_at"`
+	Session   *GameSession        `json:"session,omitempty"`
+}
+
 // MatchStatusResponse represents the response for match status queries
 type MatchStatusResponse struct {
-	Status  MatchStatus   `json:"status"`
-	Team    *string       `json:"team,omitempty"`
-	Session *GameSession  `json:"session,omitempty"`
-	Error   *string       `json:"error,omitempty"`
+	Status     MatchStatus  `json:"status"`
+	Team       *string      `json:"team,omitempty"`
+	Session    *GameSession `json:"session,omitempty"`
+	Error      *string      `json:"error,omitempty"`
+	MatchID    string       `json:"match_id,omitempty"`
+	Players    []string     `json:"players,omitempty"` // teammates
+	TeamName   string       `json:"team_name,omitempty"`
+	CreatedAt  string       `json:"created_at,omitempty"`
+	AllPlayers []string     `json:"all_players,omitempty"` // all players in match
 }
 
 // AllocationRequest represents a request to allocate a game session
 type AllocationRequest struct {
-	MatchID string   `json:"match_id"`
-	GameID  string   `json:"game_id"`
-	Players []string `json:"players"`
-	TeamName string  `json:"team_name"`
+	MatchID  string   `json:"match_id"`
+	GameID   string   `json:"game_id"`
+	Players  []string `json:"players"`
+	TeamName string   `json:"team_name"`
 }
 
 // AllocationResponse represents the response from the allocation service
@@ -113,4 +128,4 @@ func NewMatch(gameID, teamName string, players []string) *Match {
 		Players:   players,
 		CreatedAt: time.Now(),
 	}
-} 
+}

@@ -40,3 +40,104 @@
 .read-the-docs {
   color: #888;
 }
+
+/* Custom styles for MM-Rules client */
+.game-mode-card {
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.game-mode-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.game-mode-button {
+  transition: all 0.3s ease;
+}
+
+.game-mode-button:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.match-info-card {
+  animation: slideIn 0.5s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.player-badge {
+  transition: all 0.2s ease;
+}
+
+.player-badge:hover {
+  transform: scale(1.02);
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .game-mode-container {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  .game-mode-card {
+    min-width: 280px;
+    margin-bottom: 20px;
+  }
+  
+  .match-info-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .player-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Loading animation */
+.loading-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Status indicators */
+.status-success {
+  border-color: #27ae60;
+  background-color: #f8fff9;
+}
+
+.status-info {
+  border-color: #3498db;
+  background-color: #e8f4fd;
+}
+
+.status-warning {
+  border-color: #f39c12;
+  background-color: #fef9e7;
+}
+
+.status-error {
+  border-color: #e74c3c;
+  background-color: #fdf2f2;
+}

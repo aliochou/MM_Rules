@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -25,12 +26,32 @@ type Handler struct {
 
 // NewHandler creates a new API handler
 func NewHandler(storage storage.Storage, allocator allocation.Allocator, logger *logrus.Logger) *Handler {
-	return &Handler{
+	handler := &Handler{
 		storage:    storage,
 		matchmaker: matchmaker.NewMatchmaker(),
 		ruleEngine: engine.NewRuleEngine(),
 		allocator:  allocator,
 		logger:     logger,
+	}
+
+	// Start background cleanup routine
+	go handler.startBackgroundCleanup()
+
+	return handler
+}
+
+// startBackgroundCleanup runs a periodic cleanup of expired requests
+func (h *Handler) startBackgroundCleanup() {
+	ticker := time.NewTicker(30 * time.Second) // Run every 30 seconds
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := h.storage.CleanupExpiredRequests(context.Background()); err != nil {
+				h.logger.WithError(err).Error("Background cleanup failed")
+			}
+		}
 	}
 }
 
@@ -50,6 +71,16 @@ func (h *Handler) CreateMatchRequest(c *gin.Context) {
 		metrics.RecordHTTPRequest("POST", "/api/v1/match-request", "400", time.Since(start).Seconds())
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Remove any existing pending requests for this player and game
+	requests, err := h.storage.GetGameQueue(c.Request.Context(), req.GameID)
+	if err == nil {
+		for _, r := range requests {
+			if r.PlayerID == req.PlayerID && r.Status == models.StatusPending {
+				_ = h.storage.RemoveFromQueue(c.Request.Context(), req.GameID, r.ID)
+			}
+		}
 	}
 
 	// Create match request
@@ -162,9 +193,21 @@ func (h *Handler) GetMatchStatus(c *gin.Context) {
 
 	// If matched, try to find the match and session info
 	if request.Status == models.StatusMatched || request.Status == models.StatusAllocated {
-		// This is a simplified approach - in a real implementation you'd need to
-		// track which match a request belongs to
-		h.logger.WithField("request_id", requestID).Warn("Match found but session info not available")
+		matchID, err := h.storage.GetMatchIDForRequest(c.Request.Context(), requestID)
+		if err == nil {
+			match, err := h.storage.GetMatch(c.Request.Context(), matchID)
+			if err == nil {
+				statusResponse.Session = match.Session
+				statusResponse.MatchID = match.ID
+				statusResponse.Players = match.Players
+				statusResponse.TeamName = match.TeamName
+				statusResponse.CreatedAt = match.CreatedAt.Format(time.RFC3339)
+			}
+		}
+		// If not found, fallback to warning
+		if statusResponse.Session == nil {
+			h.logger.WithField("request_id", requestID).Warn("Match found but session info not available")
+		}
 	}
 
 	metrics.RecordHTTPRequest("GET", "/api/v1/match-status", "200", time.Since(start).Seconds())
@@ -181,7 +224,8 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 		return
 	}
 
-	// Get game configuration
+	_ = h.storage.CleanupExpiredRequests(c.Request.Context())
+
 	config, err := h.storage.GetGameConfig(c.Request.Context(), gameID)
 	if err != nil {
 		metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "404", time.Since(start).Seconds())
@@ -189,7 +233,6 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 		return
 	}
 
-	// Get pending match requests
 	requests, err := h.storage.GetGameQueue(c.Request.Context(), gameID)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get game queue")
@@ -198,7 +241,6 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 		return
 	}
 
-	// Update queue size metric
 	metrics.SetQueueSize(gameID, len(requests))
 
 	if len(requests) == 0 {
@@ -210,13 +252,11 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 		return
 	}
 
-	// Process matchmaking
-	matchResultsWithRequests := h.matchmaker.ProcessMatchPoolWithRequests(requests, config)
-
-	// Record matchmaking duration
+	// Use ProcessFullTeamMatchPool for multi-team support
+	multiTeamMatches := h.matchmaker.ProcessFullTeamMatchPool(requests, config)
 	metrics.RecordMatchmakingDuration(gameID, time.Since(start).Seconds())
 
-	if len(matchResultsWithRequests) == 0 {
+	if len(multiTeamMatches) == 0 {
 		metrics.RecordHTTPRequest("POST", "/api/v1/process-matchmaking", "200", time.Since(start).Seconds())
 		c.JSON(http.StatusOK, gin.H{
 			"message": "No matches could be formed",
@@ -225,30 +265,72 @@ func (h *Handler) ProcessMatchmaking(c *gin.Context) {
 		return
 	}
 
-	// Store matches and update request statuses
 	var matchResults []gin.H
-	for _, result := range matchResultsWithRequests {
-		// Store the match
-		if err := h.storage.StoreMatch(c.Request.Context(), result.Match); err != nil {
-			h.logger.WithError(err).Error("Failed to store match")
+	for _, match := range multiTeamMatches {
+		h.logger.WithFields(logrus.Fields{
+			"match_id": match.ID,
+			"teams":    match.Teams,
+		}).Info("Storing multi-team match and updating all request statuses")
+
+		if err := h.storage.StoreMultiTeamMatch(c.Request.Context(), match); err != nil {
+			h.logger.WithError(err).Error("Failed to store multi-team match")
 			continue
 		}
 
-		// Record match creation metrics
-		metrics.RecordMatchCreated(gameID, len(result.Match.Players))
+		metrics.RecordMatchCreated(gameID, len(h.matchmaker.FlattenTeams(match.Teams)))
 
-		// Update request statuses using request IDs
-		for _, requestID := range result.RequestIDs {
-			if err := h.storage.UpdateMatchRequestStatus(c.Request.Context(), requestID, models.StatusMatched); err != nil {
-				h.logger.WithError(err).WithField("request_id", requestID).Error("Failed to update request status")
+		// For each team, for each player, update status and mapping
+		for teamName, playerIDs := range match.Teams {
+			for _, playerID := range playerIDs {
+				// Find the request ID for this player
+				var requestID string
+				for _, req := range requests {
+					if req.PlayerID == playerID {
+						requestID = req.ID
+						break
+					}
+				}
+				if requestID == "" {
+					h.logger.WithField("player_id", playerID).Warn("No request ID found for player")
+					continue
+				}
+
+				if err := h.storage.UpdateMatchRequestStatus(c.Request.Context(), requestID, models.StatusMatched); err != nil {
+					h.logger.WithError(err).WithField("request_id", requestID).Error("Failed to update request status")
+				}
+				if err := h.storage.RemoveFromQueue(c.Request.Context(), gameID, requestID); err != nil {
+					h.logger.WithError(err).WithField("request_id", requestID).Error("Failed to remove request from queue")
+				}
+				if err := h.storage.StoreRequestMatchMapping(c.Request.Context(), requestID, match.ID); err != nil {
+					h.logger.WithError(err).WithField("request_id", requestID).Error("Failed to store request-match mapping")
+				}
+
+				// Build teammates (all players on the same team)
+				teammates := make([]string, 0, len(playerIDs))
+				for _, pid := range playerIDs {
+					teammates = append(teammates, pid)
+				}
+				// Build all players in match
+				allPlayers := h.matchmaker.FlattenTeams(match.Teams)
+
+				statusResp := &models.MatchStatusResponse{
+					Status:     models.StatusMatched,
+					MatchID:    match.ID,
+					Players:    teammates,
+					TeamName:   teamName,
+					CreatedAt:  match.CreatedAt.Format(time.RFC3339),
+					AllPlayers: allPlayers,
+				}
+				if err := h.storage.StoreMatchStatus(c.Request.Context(), requestID, statusResp); err != nil {
+					h.logger.WithError(err).WithField("request_id", requestID).Error("Failed to store match status response")
+				}
 			}
 		}
 
 		matchResults = append(matchResults, gin.H{
-			"match_id":   result.Match.ID,
-			"players":    result.Match.Players,
-			"team_name":  result.Match.TeamName,
-			"created_at": result.Match.CreatedAt,
+			"match_id":   match.ID,
+			"teams":      match.Teams,
+			"created_at": match.CreatedAt.Format(time.RFC3339),
 		})
 	}
 

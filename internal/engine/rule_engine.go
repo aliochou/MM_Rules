@@ -19,7 +19,7 @@ func NewRuleEngine() *RuleEngine {
 // EvaluatePlayer evaluates a single player against a set of rules
 func (re *RuleEngine) EvaluatePlayer(player *models.MatchRequest, rules []models.Rule, elapsedTime time.Duration) (bool, []string) {
 	var violations []string
-	
+
 	// Sort rules by priority (higher priority first)
 	sortedRules := make([]models.Rule, len(rules))
 	copy(sortedRules, rules)
@@ -29,12 +29,8 @@ func (re *RuleEngine) EvaluatePlayer(player *models.MatchRequest, rules []models
 
 	for _, rule := range sortedRules {
 		if !re.evaluateRule(player, rule, elapsedTime) {
-			violations = append(violations, fmt.Sprintf("Rule '%s' failed", rule.Field))
-			
-			// If this is a strict rule, fail immediately
-			if rule.Strict {
-				return false, violations
-			}
+			violation := fmt.Sprintf("Rule '%s' failed", rule.Field)
+			violations = append(violations, violation)
 		}
 	}
 
@@ -109,6 +105,7 @@ func (re *RuleEngine) evaluateMax(value interface{}, max int) bool {
 func (re *RuleEngine) evaluateContains(value interface{}, contains string) bool {
 	switch v := value.(type) {
 	case string:
+		// Check if string contains the substring
 		return v == contains
 	case []interface{}:
 		for _, item := range v {
@@ -125,7 +122,8 @@ func (re *RuleEngine) evaluateContains(value interface{}, contains string) bool 
 		}
 		return false
 	default:
-		return false
+		// For other types, convert to string and check
+		return fmt.Sprintf("%v", v) == contains
 	}
 }
 
@@ -177,7 +175,7 @@ func (re *RuleEngine) ValidateGameConfig(config *models.GameConfig) error {
 		if rule.Field == "" {
 			return fmt.Errorf("rule %d: field is required", i)
 		}
-		
+
 		// Check that at least one evaluation criteria is set
 		if rule.Min == nil && rule.Max == nil && rule.Contains == nil && rule.Equals == nil {
 			return fmt.Errorf("rule %d: at least one evaluation criteria (min, max, contains, equals) must be set", i)
@@ -185,4 +183,4 @@ func (re *RuleEngine) ValidateGameConfig(config *models.GameConfig) error {
 	}
 
 	return nil
-} 
+}

@@ -47,8 +47,8 @@ func (rs *RedisStorage) StoreMatchRequest(ctx context.Context, request *models.M
 		return fmt.Errorf("failed to marshal match request: %w", err)
 	}
 
-	// Set with expiration (24 hours)
-	err = rs.client.Set(ctx, key, data, 24*time.Hour).Err()
+	// Set with expiration (60 seconds)
+	err = rs.client.Set(ctx, key, data, 60*time.Second).Err()
 	if err != nil {
 		return fmt.Errorf("failed to store match request: %w", err)
 	}
@@ -85,7 +85,7 @@ func (rs *RedisStorage) GetMatchRequest(ctx context.Context, requestID string) (
 // GetGameQueue retrieves all pending match requests for a game
 func (rs *RedisStorage) GetGameQueue(ctx context.Context, gameID string) ([]*models.MatchRequest, error) {
 	queueKey := fmt.Sprintf("game_queue:%s", gameID)
-	
+
 	// Get all request IDs in the queue
 	requestIDs, err := rs.client.LRange(ctx, queueKey, 0, -1).Result()
 	if err != nil {
@@ -108,7 +108,13 @@ func (rs *RedisStorage) GetGameQueue(ctx context.Context, gameID string) ([]*mod
 // RemoveFromQueue removes a match request from the game queue
 func (rs *RedisStorage) RemoveFromQueue(ctx context.Context, gameID, requestID string) error {
 	queueKey := fmt.Sprintf("game_queue:%s", gameID)
-	return rs.client.LRem(ctx, queueKey, 0, requestID).Err()
+
+	result := rs.client.LRem(ctx, queueKey, 0, requestID)
+	if result.Err() != nil {
+		return result.Err()
+	}
+
+	return nil
 }
 
 // UpdateMatchRequestStatus updates the status of a match request
@@ -119,14 +125,23 @@ func (rs *RedisStorage) UpdateMatchRequestStatus(ctx context.Context, requestID 
 	}
 
 	request.Status = status
-	return rs.StoreMatchRequest(ctx, request)
+
+	// Store the updated request without re-adding to queue
+	key := fmt.Sprintf("match_request:%s", request.ID)
+	data, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("failed to marshal match request: %w", err)
+	}
+
+	// Set with expiration (60 seconds) but don't add to queue
+	return rs.client.Set(ctx, key, data, 60*time.Second).Err()
 }
 
 // StoreGameConfig stores a game configuration
 func (rs *RedisStorage) StoreGameConfig(ctx context.Context, config *models.GameConfig) error {
 	key := fmt.Sprintf("game_config:%s", config.GameID)
 	config.UpdatedAt = time.Now()
-	
+
 	data, err := json.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("failed to marshal game config: %w", err)
@@ -219,9 +234,6 @@ func (rs *RedisStorage) GetMatchStatus(ctx context.Context, requestID string) (*
 
 // CleanupExpiredRequests removes expired match requests
 func (rs *RedisStorage) CleanupExpiredRequests(ctx context.Context) error {
-	// This is a simplified cleanup - in production you might want more sophisticated logic
-	// For now, we'll rely on Redis TTL to handle expiration
-	
 	// Get all game configs to find active games
 	pattern := "game_config:*"
 	keys, err := rs.client.Keys(ctx, pattern).Result()
@@ -229,25 +241,57 @@ func (rs *RedisStorage) CleanupExpiredRequests(ctx context.Context) error {
 		return fmt.Errorf("failed to get game config keys: %w", err)
 	}
 
+	totalRemoved := 0
 	for _, key := range keys {
 		gameID := key[len("game_config:"):]
 		queueKey := fmt.Sprintf("game_queue:%s", gameID)
-		
+
 		// Get all request IDs in the queue
 		requestIDs, err := rs.client.LRange(ctx, queueKey, 0, -1).Result()
 		if err != nil {
+			fmt.Printf("[CLEANUP] Failed to get queue for %s: %v\n", gameID, err)
 			continue
 		}
+
+		if len(requestIDs) == 0 {
+			continue
+		}
+
+		fmt.Printf("[CLEANUP] Checking %d requests in queue for %s\n", len(requestIDs), gameID)
+		removedCount := 0
 
 		// Check each request and remove if expired
 		for _, requestID := range requestIDs {
 			requestKey := fmt.Sprintf("match_request:%s", requestID)
 			exists, err := rs.client.Exists(ctx, requestKey).Result()
-			if err != nil || exists == 0 {
+			if err != nil {
+				fmt.Printf("[CLEANUP] Error checking request %s: %v\n", requestID, err)
+				continue
+			}
+
+			if exists == 0 {
 				// Request doesn't exist, remove from queue
-				rs.client.LRem(ctx, queueKey, 0, requestID)
+				result := rs.client.LRem(ctx, queueKey, 0, requestID)
+				if result.Err() != nil {
+					fmt.Printf("[CLEANUP] Failed to remove request %s from queue: %v\n", requestID, result.Err())
+				} else {
+					count, _ := result.Result()
+					if count > 0 {
+						removedCount += int(count)
+						fmt.Printf("[CLEANUP] Removed expired request %s from queue\n", requestID)
+					}
+				}
 			}
 		}
+
+		if removedCount > 0 {
+			fmt.Printf("[CLEANUP] Removed %d expired requests from %s queue\n", removedCount, gameID)
+			totalRemoved += removedCount
+		}
+	}
+
+	if totalRemoved > 0 {
+		fmt.Printf("[CLEANUP] Total cleanup: removed %d expired requests across all queues\n", totalRemoved)
 	}
 
 	return nil
@@ -280,4 +324,47 @@ func (rs *RedisStorage) GetStats(ctx context.Context) (map[string]interface{}, e
 	stats["total_pending_requests"] = totalRequests
 
 	return stats, nil
-} 
+}
+
+// StoreRequestMatchMapping stores a mapping from requestID to matchID
+func (rs *RedisStorage) StoreRequestMatchMapping(ctx context.Context, requestID, matchID string) error {
+	key := fmt.Sprintf("request_match:%s", requestID)
+	return rs.client.Set(ctx, key, matchID, 7*24*time.Hour).Err()
+}
+
+// GetMatchIDForRequest retrieves the matchID for a given requestID
+func (rs *RedisStorage) GetMatchIDForRequest(ctx context.Context, requestID string) (string, error) {
+	key := fmt.Sprintf("request_match:%s", requestID)
+	matchID, err := rs.client.Get(ctx, key).Result()
+	if err != nil {
+		return "", err
+	}
+	return matchID, nil
+}
+
+// StoreMultiTeamMatch stores a MultiTeamMatch in Redis
+func (rs *RedisStorage) StoreMultiTeamMatch(ctx context.Context, match *models.MultiTeamMatch) error {
+	key := fmt.Sprintf("multi_team_match:%s", match.ID)
+	data, err := json.Marshal(match)
+	if err != nil {
+		return fmt.Errorf("failed to marshal multi-team match: %w", err)
+	}
+	return rs.client.Set(ctx, key, data, 7*24*time.Hour).Err()
+}
+
+// GetMultiTeamMatch retrieves a MultiTeamMatch by ID
+func (rs *RedisStorage) GetMultiTeamMatch(ctx context.Context, matchID string) (*models.MultiTeamMatch, error) {
+	key := fmt.Sprintf("multi_team_match:%s", matchID)
+	data, err := rs.client.Get(ctx, key).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, fmt.Errorf("multi-team match not found: %s", matchID)
+		}
+		return nil, fmt.Errorf("failed to get multi-team match: %w", err)
+	}
+	var match models.MultiTeamMatch
+	if err := json.Unmarshal(data, &match); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal multi-team match: %w", err)
+	}
+	return &match, nil
+}
