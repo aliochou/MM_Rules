@@ -60,26 +60,22 @@ A scalable, rule-driven matchmaking backend for multiplayer games built in Go. T
    make redis
    ```
 
-2. **Run the server**
+2. **Run the server (loads rules automatically)**
    ```bash
-   # Using Go directly
-   go run cmd/server/main.go
+   ./scripts/start-server.sh
+   # or
+   make server-start
    
-   # Or using make command
-   make run
+   # If you use 'make run' or 'go run ...', you must load rules manually:
+   # make load-rules
    ```
 
-3. **Load predefined rule sets**
-   ```bash
-   make load-rules
-   ```
-
-4. **Test the system**
+3. **Test the system**
    ```bash
    make test-rules
    ```
 
-5. **Run the demo**
+4. **Run the demo**
    ```bash
    make demo-rules
    ```
@@ -516,14 +512,18 @@ games:
 
 1. **Start development environment**
    ```bash
-   make redis        # Start Redis
-   make run          # Start server
+   make redis                # Start Redis
+   ./scripts/start-server.sh # Start server and load rules automatically
+   # or
+   make server-start
+   
+   # If you use 'make run', load rules manually:
+   # make load-rules
    ```
 
-2. **Load and test rules**
+2. **Test rules**
    ```bash
-   make load-rules   # Load predefined rules
-   make test-rules   # Test rule sets
+   make test-rules           # Test rule sets
    ```
 
 3. **Create new rules**
